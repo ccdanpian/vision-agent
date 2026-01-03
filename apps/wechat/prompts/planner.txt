@@ -68,8 +68,32 @@
 3. **当前在微信其他页面**（有底部导航栏）
    → 点击"发现"Tab → 点击"朋友圈"
 
-4. **当前不在微信**
+4. **当前在深层页面**（如聊天记录、个人资料等，看不到底部导航栏）
+   → 需要多次返回才能看到导航栏
+   → **必须为点击"发现"Tab 配置 fallback！**
+
+5. **当前不在微信**
    → launch_app 启动微信
+
+**发朋友圈示例（从深层页面）：**
+```json
+{
+  "current_state": "当前在聊天记录详情页面，看不到底部导航栏",
+  "strategy": "需要先返回到有导航栏的页面，使用 fallback 自动重试",
+  "steps": [
+    {"step": 1, "action": "tap", "target_ref": "wechat_back", "description": "点击返回"},
+    {
+      "step": 2,
+      "action": "tap",
+      "target_ref": "wechat_tab_discover",
+      "description": "点击发现Tab",
+      "fallback": {"action": "press_key", "params": {"keycode": 4}, "description": "按返回键"}
+    },
+    {"step": 3, "action": "tap", "target_ref": "wechat_moments", "description": "点击朋友圈入口"},
+    {"step": 4, "action": "tap", "target_ref": "wechat_moments_camera", "description": "点击发布按钮"}
+  ]
+}
+```
 
 ---
 
@@ -286,6 +310,37 @@
 2. **找不到元素** - 尝试滑动屏幕查找
 3. **弹窗遮挡** - 点击关闭或按返回键
 4. **加载中** - 添加等待时间
+
+### fallback 配置（重要！）
+
+当目标元素可能不在当前屏幕时，必须配置 `fallback` 让系统自动重试：
+
+**需要配置 fallback 的场景：**
+1. 点击底部导航栏 Tab（发现、通讯录、我）- 当前可能在深层页面
+2. 点击顶部按钮（搜索、+号）- 当前可能在子页面
+3. 任何需要先返回到主页面才能看到的元素
+
+**fallback 格式：**
+```json
+{
+  "step": 3,
+  "action": "tap",
+  "target_ref": "wechat_tab_discover",
+  "description": "点击发现Tab",
+  "fallback": {
+    "action": "press_key",
+    "params": {"keycode": 4},
+    "description": "按返回键回到上一级"
+  }
+}
+```
+
+系统会在定位失败时自动执行 fallback（最多 3 次），每次执行后重新截图并尝试定位。
+
+**常用 fallback 动作：**
+- 按返回键：`{"action": "press_key", "params": {"keycode": 4}}`
+- 向上滑动：`{"action": "swipe", "params": {"direction": "up"}}`
+- 向下滑动：`{"action": "swipe", "params": {"direction": "down"}}`
 
 ## 输出格式
 
