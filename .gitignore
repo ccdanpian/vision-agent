@@ -1,0 +1,79 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environment
+venv/
+env/
+.venv/
+.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Screenshots and temporary files
+screenshots/
+temp/
+*.tmp
+
+# PaddleOCR models (large files)
+models/
+~/.paddleocr/
+
+# Test outputs
+test_output/
+*.test.png
+
+# Secrets
+.env.local
+*.pem
+*.key
+
+# Large binary files - emulator
+moniqi/
+
+# Model cache (large files)
+cache/
+
+# Debug/test files
+111/
+*.7z
+debug_screenshot.png
+screenshot*.png
+
+# Large APK files
+*.apk
+
+# Temporary image files
+*.jpg
+!apps/*/images/**/*.jpg

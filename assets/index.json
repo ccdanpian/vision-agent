@@ -1,0 +1,297 @@
+{
+  "version": "1.0",
+  "description": "VisionAgent 参考图库索引",
+  "icons": {
+    "wechat": {
+      "path": "icons/wechat.png",
+      "aliases": ["微信", "WeChat"],
+      "package": "com.tencent.mm",
+      "exists": true
+    },
+    "wechat_work": {
+      "path": "icons/wechat_work.png",
+      "aliases": ["企业微信", "WeCom"],
+      "package": "com.tencent.wework",
+      "exists": false
+    },
+    "qq": {
+      "path": "icons/qq.png",
+      "aliases": ["QQ"],
+      "package": "com.tencent.mobileqq",
+      "exists": false
+    },
+    "chrome": {
+      "path": "icons/chrome.png",
+      "aliases": ["Chrome", "谷歌浏览器"],
+      "package": "com.android.chrome",
+      "exists": true
+    },
+    "settings": {
+      "path": "icons/setting.png",
+      "aliases": ["设置", "Settings"],
+      "package": "com.android.settings",
+      "exists": true
+    },
+    "phone": {
+      "path": "icons/call.png",
+      "aliases": ["电话", "Phone", "拨号", "通话"],
+      "package": "com.android.dialer",
+      "exists": true
+    },
+    "contacts": {
+      "path": "icons/contacts.png",
+      "aliases": ["联系人", "通讯录"],
+      "package": "com.android.contacts",
+      "exists": false
+    },
+    "messages": {
+      "path": "icons/messages.png",
+      "aliases": ["短信", "信息", "Messages"],
+      "package": "com.android.mms",
+      "exists": false
+    },
+    "camera": {
+      "path": "icons/camera.png",
+      "aliases": ["相机", "Camera"],
+      "package": "com.android.camera",
+      "exists": false
+    },
+    "gallery": {
+      "path": "icons/gallery.png",
+      "aliases": ["相册", "图库", "Gallery"],
+      "package": "com.android.gallery3d",
+      "exists": false
+    },
+    "alipay": {
+      "path": "icons/alipay.png",
+      "aliases": ["支付宝", "Alipay"],
+      "package": "com.eg.android.AlipayGphone",
+      "exists": false
+    },
+    "taobao": {
+      "path": "icons/taobao.png",
+      "aliases": ["淘宝", "Taobao"],
+      "package": "com.taobao.taobao",
+      "exists": false
+    },
+    "wechat_contacts": {
+      "path": "icons/wechat_contacts.png",
+      "aliases": ["微信通讯录", "微信联系人"],
+      "description": "微信通讯录图标",
+      "exists": true
+    },
+    "wechat_search": {
+      "path": "icons/wechat_search.png",
+      "aliases": ["微信搜索"],
+      "description": "微信搜索图标",
+      "exists": true
+    },
+    "send_button": {
+      "path": "icons/send_button.png",
+      "aliases": ["发送", "发送按钮"],
+      "description": "微信发送按钮",
+      "exists": true
+    },
+    "xiaotiancai": {
+      "path": "icons/xiaotiancai.png",
+      "aliases": ["小天才", "小天才电话手表"],
+      "description": "小天才应用图标",
+      "exists": true
+    }
+  },
+  "ui": {
+    "back_arrow_black": {
+      "path": "ui/navigation/back_arrow_black.png",
+      "description": "黑色返回箭头",
+      "variants": ["ui/navigation/back_arrow_white.png"],
+      "exists": false
+    },
+    "back_arrow_white": {
+      "path": "ui/navigation/back_arrow_white.png",
+      "description": "白色返回箭头",
+      "exists": false
+    },
+    "home_button": {
+      "path": "ui/navigation/home_button.png",
+      "description": "主页按钮",
+      "exists": false
+    },
+    "recent_apps": {
+      "path": "ui/navigation/recent_apps.png",
+      "description": "最近任务按钮",
+      "exists": false
+    },
+    "hamburger_menu": {
+      "path": "ui/navigation/hamburger_menu.png",
+      "description": "汉堡菜单图标",
+      "exists": false
+    },
+    "search_icon": {
+      "path": "ui/actions/search_icon.png",
+      "description": "搜索图标/放大镜",
+      "exists": false
+    },
+    "add_plus": {
+      "path": "ui/actions/add_plus.png",
+      "description": "添加/加号按钮",
+      "exists": false
+    },
+    "more_dots_v": {
+      "path": "ui/actions/more_dots_v.png",
+      "description": "更多选项(竖向三点)",
+      "exists": false
+    },
+    "more_dots_h": {
+      "path": "ui/actions/more_dots_h.png",
+      "description": "更多选项(横向三点)",
+      "exists": false
+    },
+    "share_icon": {
+      "path": "ui/actions/share_icon.png",
+      "description": "分享图标",
+      "exists": false
+    },
+    "delete_icon": {
+      "path": "ui/actions/delete_icon.png",
+      "description": "删除图标",
+      "exists": false
+    },
+    "edit_icon": {
+      "path": "ui/actions/edit_icon.png",
+      "description": "编辑图标",
+      "exists": false
+    },
+    "refresh_icon": {
+      "path": "ui/actions/refresh_icon.png",
+      "description": "刷新图标",
+      "exists": false
+    },
+    "confirm_button": {
+      "path": "ui/dialogs/confirm_button.png",
+      "description": "确认/允许按钮",
+      "exists": false
+    },
+    "cancel_button": {
+      "path": "ui/dialogs/cancel_button.png",
+      "description": "取消按钮",
+      "exists": false
+    },
+    "ok_button": {
+      "path": "ui/dialogs/ok_button.png",
+      "description": "确定按钮",
+      "exists": false
+    },
+    "close_x": {
+      "path": "ui/dialogs/close_x.png",
+      "description": "关闭按钮(X)",
+      "exists": false
+    },
+    "close_x_circle": {
+      "path": "ui/dialogs/close_x_circle.png",
+      "description": "关闭按钮(圆形X)",
+      "exists": false
+    },
+    "checkbox_checked": {
+      "path": "ui/dialogs/checkbox_checked.png",
+      "description": "已勾选的复选框",
+      "exists": false
+    },
+    "text_field": {
+      "path": "ui/input/text_field.png",
+      "description": "文本输入框",
+      "exists": false
+    },
+    "search_bar": {
+      "path": "ui/input/search_bar.png",
+      "description": "搜索栏",
+      "exists": false
+    },
+    "send_button": {
+      "path": "ui/input/send_button.png",
+      "description": "发送按钮",
+      "exists": false
+    },
+    "voice_input": {
+      "path": "ui/input/voice_input.png",
+      "description": "语音输入按钮",
+      "exists": false
+    },
+    "play_button": {
+      "path": "ui/media/play_button.png",
+      "description": "播放按钮",
+      "exists": false
+    },
+    "pause_button": {
+      "path": "ui/media/pause_button.png",
+      "description": "暂停按钮",
+      "exists": false
+    },
+    "video_call": {
+      "path": "ui/media/video_call.png",
+      "description": "视频通话按钮",
+      "exists": false
+    },
+    "voice_call": {
+      "path": "ui/media/voice_call.png",
+      "description": "语音通话按钮",
+      "exists": false
+    },
+    "camera_switch": {
+      "path": "ui/media/camera_switch.png",
+      "description": "切换摄像头按钮",
+      "exists": false
+    }
+  },
+  "states": {
+    "home_screen": {
+      "path": "states/system/home_screen.png",
+      "description": "手机桌面/主屏幕",
+      "exists": false
+    },
+    "lock_screen": {
+      "path": "states/system/lock_screen.png",
+      "description": "锁屏界面",
+      "exists": false
+    },
+    "notification_panel": {
+      "path": "states/system/notification_panel.png",
+      "description": "通知栏/下拉面板",
+      "exists": false
+    },
+    "app_drawer": {
+      "path": "states/system/app_drawer.png",
+      "description": "应用抽屉",
+      "exists": false
+    },
+    "wechat_main": {
+      "path": "states/wechat/main.png",
+      "description": "微信主界面",
+      "exists": false
+    },
+    "wechat_chat_list": {
+      "path": "states/wechat/chat_list.png",
+      "description": "微信聊天列表",
+      "exists": false
+    },
+    "wechat_chat_window": {
+      "path": "states/wechat/chat_window.png",
+      "description": "微信聊天窗口",
+      "exists": false
+    },
+    "wechat_contacts": {
+      "path": "states/wechat/contacts.png",
+      "description": "微信通讯录",
+      "exists": false
+    },
+    "wechat_discover": {
+      "path": "states/wechat/discover.png",
+      "description": "微信发现页",
+      "exists": false
+    },
+    "wechat_me": {
+      "path": "states/wechat/me.png",
+      "description": "微信我的页面",
+      "exists": false
+    }
+  }
+}

@@ -1,0 +1,80 @@
+# 微信模块预定义任务
+# simple: true 的任务直接执行，其他交给 AI 规划
+
+tasks:
+  # === 打开微信（简单任务） ===
+  - name: 打开微信
+    description: 启动微信应用
+    simple: true
+    patterns:
+      - "打开微信"
+      - "启动微信"
+      - "进入微信"
+    steps:
+      - action: launch_app
+        description: 启动微信
+        package_name: "com.tencent.mm"
+
+  # === 以下任务交给 AI 规划 ===
+  # 这些任务涉及界面元素定位，由 AI 根据屏幕内容规划
+
+  - name: 发消息给联系人
+    description: 给指定联系人发送消息
+    patterns:
+      - "(?:给|向|跟)?(?P<contact>.+?)(?:发微信|发消息|发信息)(?:说)?(?P<message>.+)?"
+      - "(?:微信)?(?:发给|告诉)(?P<contact>.+?)(?:说)?(?P<message>.+)?"
+      - "(?:用微信)?给(?P<contact>.+?)说(?P<message>.+)"
+    variables:
+      - contact
+      - message
+
+  - name: 查看朋友圈
+    description: 打开朋友圈
+    patterns:
+      - "(?:打开|查看|看看)?朋友圈"
+      - "刷朋友圈"
+
+  - name: 扫一扫
+    description: 打开扫码功能
+    patterns:
+      - "扫一扫"
+      - "扫码"
+      - "扫描二维码"
+      - "微信扫码"
+
+  - name: 发朋友圈
+    description: 发送朋友圈动态
+    patterns:
+      - "发(?:个)?朋友圈"
+      - "发圈"
+      - "发动态"
+
+  - name: 添加好友
+    description: 添加新好友（通过微信号、手机号或姓名）
+    patterns:
+      - "加好友"
+      - "添加好友"
+      - "加(?P<contact>.+?)(?:为好友|好友)"
+      - "添加(?:微信)?(?:联系人|好友)[：:]?\\s*(?P<contact>.+)"
+      - "(?:微信)?加(?P<contact>\\d{5,})"
+    variables:
+      - contact
+
+  - name: 打开通讯录
+    description: 切换到通讯录页面
+    patterns:
+      - "(?:打开|查看)?通讯录"
+      - "联系人列表"
+
+  - name: 打开我的页面
+    description: 切换到我的页面
+    patterns:
+      - "(?:打开)?我的"
+      - "个人中心"
+      - "我的页面"
+
+  - name: 查看收藏
+    description: 打开收藏列表
+    patterns:
+      - "(?:打开|查看)?收藏"
+      - "我的收藏"

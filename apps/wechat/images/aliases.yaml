@@ -1,0 +1,75 @@
+# 微信模块参考图别名配置
+# 格式: 中文别名 -> 英文文件名（不含扩展名）
+# 支持子目录，如: 张华 -> contacts/zhanghua
+
+aliases:
+  # 联系人（存放在 contacts/ 子目录）
+  张华: contacts/zhanghua
+  # 首页
+  微信首页: wechat_home
+
+  # 底部标签栏
+  通讯录: wechat_tab_contacts
+  通讯录标签: wechat_tab_contacts
+  发现: wechat_tab_discover
+  发现标签: wechat_tab_discover
+  我: wechat_tab_me
+  我的: wechat_tab_me
+
+  # 顶部按钮
+  添加按钮: wechat_add_button
+  加号: wechat_add_button
+  +: wechat_add_button
+  搜索按钮: wechat_search_button
+  搜索: wechat_search_button
+
+  # 添加菜单
+  添加朋友: wechat_menu_add_friend
+  加好友: wechat_menu_add_friend
+  扫一扫: wechat_menu_scan
+  扫码: wechat_menu_scan
+  发起群聊: wechat_menu_group_chat
+  群聊: wechat_menu_group_chat
+  收付款: wechat_menu_receive_payment
+  付款: wechat_menu_receive_payment
+
+  # 聊天界面
+  聊天输入框: wechat_chat_input
+  输入框: wechat_chat_input
+  消息输入框: wechat_newmessage_input
+  发送按钮: wechat_chat_send
+  发送: wechat_chat_send
+  点击发送: wechat_chat_send
+  语音按钮: wechat_chat_voice
+  语音: wechat_chat_voice
+  表情: wechat_chat_emoji
+  表情按钮: wechat_chat_emoji
+  更多按钮: wechat_chat_more
+  更多: wechat_chat_more
+
+  # 导航
+  返回: wechat_back
+  返回按钮: wechat_back
+  左上角返回: wechat_back
+
+  # 添加好友流程
+  搜索输入框: wechat_add_search_input
+  添加好友搜索框: wechat_add_search_input
+  添加到通讯录: wechat_add_contact_button
+  添加联系人: wechat_add_contact_button
+  发送申请: wechat_add_send_button
+  发送好友申请: wechat_add_send_button
+  申请按钮: wechat_add_new_contact_send_button
+
+  # 通讯录界面
+  新的朋友: wechat_contacts_new_friend
+  新朋友: wechat_contacts_new_friend
+  群聊入口: wechat_contacts_group_chat
+  标签: wechat_contacts_tag
+  公众号: wechat_contacts_official
+
+  # 朋友圈
+  朋友圈: wechat_moments
+  发朋友圈: wechat_moments_camera
+  朋友圈相机: wechat_moments_camera
+  发表: wechat_moments_publish

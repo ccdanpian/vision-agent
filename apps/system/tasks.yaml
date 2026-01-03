@@ -1,0 +1,222 @@
+# 系统模块预定义任务
+# simple: true 的任务直接执行，无需 AI 规划
+
+tasks:
+  # === 电话相关 ===
+  - name: 拨打电话
+    description: 直接拨打指定号码
+    simple: true
+    patterns:
+      # 前置动词：打电话给xxx、拨打xxx、呼叫xxx
+      - "(?:打电话|拨打|呼叫|打给|致电).*?(?P<number>\\d{5,})"
+      # 后置动词：给xxx打电话（必须有"打电话"）
+      - "给(?P<number>\\d{5,})打(?:电话|个电话)"
+    variables:
+      - number
+    steps:
+      - action: call
+        description: "拨打 {number}"
+        phone_number: "{number}"
+
+  - name: 打开拨号盘
+    description: 打开系统拨号界面
+    simple: true
+    patterns:
+      - "打开拨号"
+      - "拨号盘"
+      - "电话.*拨号"
+    steps:
+      - action: launch_app
+        description: 打开拨号盘
+        package_name: "com.android.dialer"
+
+  # === 桌面/导航 ===
+  - name: 返回桌面
+    description: 返回主屏幕
+    simple: true
+    patterns:
+      - "返回桌面"
+      - "回到桌面"
+      - "主屏幕"
+      - "回主页"
+    steps:
+      - action: press_key
+        description: 按 Home 键
+        key_code: 3
+
+  - name: 返回上一级
+    description: 返回上一个界面
+    simple: true
+    patterns:
+      - "返回$"
+      - "返回上一级"
+      - "后退"
+    steps:
+      - action: press_key
+        description: 按返回键
+        key_code: 4
+
+  - name: 打开最近任务
+    description: 打开最近使用的应用列表
+    simple: true
+    patterns:
+      - "最近.*任务"
+      - "最近.*应用"
+      - "任务列表"
+    steps:
+      - action: press_key
+        description: 按最近任务键
+        key_code: 187
+
+  # === 通知栏 ===
+  - name: 下拉通知栏
+    description: 展开通知栏
+    simple: true
+    patterns:
+      - "下拉通知"
+      - "通知栏"
+      - "查看通知"
+    steps:
+      - action: swipe
+        description: 下拉通知栏
+        direction: down
+        start_y_percent: 0.0
+        end_y_percent: 0.5
+
+  - name: 收起通知栏
+    description: 收起通知栏
+    simple: true
+    patterns:
+      - "收起通知"
+      - "关闭通知栏"
+    steps:
+      - action: swipe
+        description: 上滑收起
+        direction: up
+        start_y_percent: 0.5
+        end_y_percent: 0.0
+
+  # === 音量控制 ===
+  - name: 增大音量
+    description: 提高系统音量
+    simple: true
+    patterns:
+      - "增大音量"
+      - "调大音量"
+      - "音量.*大"
+      - "声音.*大"
+    steps:
+      - action: press_key
+        description: 增大音量
+        key_code: 24
+      - action: press_key
+        description: 增大音量
+        key_code: 24
+      - action: press_key
+        description: 增大音量
+        key_code: 24
+
+  - name: 减小音量
+    description: 降低系统音量
+    simple: true
+    patterns:
+      - "减小音量"
+      - "调小音量"
+      - "音量.*小"
+      - "声音.*小"
+    steps:
+      - action: press_key
+        description: 减小音量
+        key_code: 25
+      - action: press_key
+        description: 减小音量
+        key_code: 25
+      - action: press_key
+        description: 减小音量
+        key_code: 25
+
+  - name: 静音
+    description: 设置静音模式
+    simple: true
+    patterns:
+      - "静音"
+      - "设为静音"
+      - "关闭声音"
+    steps:
+      - action: press_key
+        description: 静音
+        key_code: 164
+
+  # === 锁屏/电源 ===
+  - name: 锁屏
+    description: 锁定屏幕
+    simple: true
+    patterns:
+      - "锁屏"
+      - "锁定屏幕"
+      - "关闭屏幕"
+    steps:
+      - action: press_key
+        description: 锁屏
+        key_code: 26
+
+  # === 以下任务不标记 simple，交给 AI 处理 ===
+
+  # 发短信需要输入内容，交给 AI
+  - name: 发短信
+    description: 给指定号码发送短信
+    patterns:
+      - "(?:发短信|发信息|发消息).*?(?:给)?(?P<number>\\d{5,})"
+      - "(?:给)?(?P<number>\\d{5,}).*?(?:发短信|发信息)"
+    variables:
+      - number
+    steps:
+      - action: open_url
+        description: "打开短信界面"
+        url: "sms:{number}"
+
+  # 打开设置后可能还需要操作，交给 AI
+  - name: 打开设置
+    description: 打开系统设置
+    patterns:
+      - "打开设置"
+      - "系统设置"
+      - "进入设置"
+    steps:
+      - action: launch_app
+        description: 打开系统设置
+        package_name: "com.android.settings"
+
+  - name: WiFi设置
+    description: 打开WiFi设置
+    patterns:
+      - "(?:打开)?wifi.*设置"
+      - "无线.*设置"
+      - "网络设置"
+    steps:
+      - action: launch_app
+        description: 打开WiFi设置
+        package_name: "com.android.settings"
+        activity: ".wifi.WifiSettings"
+
+  - name: 蓝牙设置
+    description: 打开蓝牙设置
+    patterns:
+      - "蓝牙设置"
+      - "打开蓝牙"
+    steps:
+      - action: launch_app
+        description: 打开蓝牙设置
+        package_name: "com.android.settings"
+        activity: ".bluetooth.BluetoothSettings"
+
+  - name: 截图
+    description: 截取当前屏幕
+    patterns:
+      - "截图"
+      - "截屏"
+      - "屏幕截图"
+    steps:
+      - action: screenshot
+        description: 截取屏幕
+        save_to_device: true

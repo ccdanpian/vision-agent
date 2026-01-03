@@ -1,0 +1,68 @@
+# Chrome 浏览器模块配置
+# 处理浏览器相关操作
+
+name: Chrome 浏览器
+package: com.android.chrome
+version: "1.0.0"
+description: |
+  Chrome 浏览器自动化模块，支持：
+  - 打开网页
+  - 搜索内容
+  - 书签管理
+  - 历史记录
+  - 下载管理
+  - 标签页管理
+
+author: VisionAgent
+
+# 路由关键词
+keywords:
+  # 应用名
+  - chrome
+  - 浏览器
+  - 谷歌浏览器
+
+  # 网页操作
+  - 打开网页
+  - 打开网站
+  - 访问
+  - 上网
+  - 网页
+
+  # 搜索
+  - 搜索
+  - 百度
+  - 谷歌
+  - 查找
+  - 查询
+
+  # 网址
+  - http
+  - https
+  - www
+  - .com
+  - .cn
+  - .org
+  - .net
+
+  # 功能
+  - 书签
+  - 收藏
+  - 历史记录
+  - 下载
+  - 标签页
+  - 新标签
+  - 刷新
+  - 前进
+  - 后退
+
+# Chrome UI 元素
+ui_elements:
+  address_bar: "地址栏"
+  search_box: "搜索框"
+  tab_switcher: "标签页切换"
+  menu_button: "菜单按钮"
+  new_tab: "新建标签"
+  bookmarks: "书签"
+  history: "历史记录"
+  downloads: "下载"

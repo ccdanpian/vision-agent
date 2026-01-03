@@ -1,0 +1,98 @@
+# Chrome 模块预定义任务
+# simple: true 的任务直接执行，其他交给 AI 规划
+
+tasks:
+  # === 打开浏览器（简单任务） ===
+  - name: 打开浏览器
+    description: 启动 Chrome 浏览器
+    simple: true
+    patterns:
+      - "打开(?:Chrome|谷歌)?浏览器"
+      - "启动浏览器"
+      - "打开Chrome"
+    steps:
+      - action: launch_app
+        description: 启动 Chrome
+        package_name: "com.android.chrome"
+
+  # === 以下任务交给 AI 规划 ===
+  # 涉及网页交互的任务需要 AI 根据页面内容处理
+
+  - name: 打开网址
+    description: 打开指定网址
+    patterns:
+      - "(?:打开|访问|进入)(?:网址|网站)?\\s*(?P<url>https?://[a-zA-Z0-9._~:/?#\\[\\]@!$&'()*+,;=-]+)"
+      - "(?:打开|访问|进入)(?:网址|网站)?\\s*(?P<url>www\\.[a-zA-Z0-9._~:/?#\\[\\]@!$&'()*+;=-]+)"
+      - "(?:打开|访问|进入)(?:网址|网站)?\\s*(?P<url>[a-zA-Z0-9][-a-zA-Z0-9]*\\.[a-z]{2,}[a-zA-Z0-9._~:/?#\\[\\]@!$&'()*+;=-]*)"
+    variables:
+      - url
+
+  - name: 搜索内容
+    description: 在浏览器中搜索
+    patterns:
+      - "(?:用浏览器)?搜索(?P<query>.+)"
+      - "(?:百度|谷歌|Google)(?:一下)?(?P<query>.+)"
+      - "(?:查一下|查找|查询)(?P<query>.+)"
+    variables:
+      - query
+
+  - name: 打开百度
+    description: 打开百度首页
+    patterns:
+      - "打开百度"
+      - "进入百度"
+      - "百度首页"
+
+  - name: 打开淘宝
+    description: 打开淘宝网页版
+    patterns:
+      - "打开淘宝(?:网页)?"
+      - "进入淘宝"
+
+  - name: 新建标签页
+    description: 新建一个空白标签页
+    patterns:
+      - "新建标签"
+      - "新标签页"
+      - "打开新标签"
+
+  - name: 查看书签
+    description: 打开书签列表
+    patterns:
+      - "(?:打开|查看)?书签"
+      - "收藏夹"
+      - "我的书签"
+
+  - name: 查看历史记录
+    description: 打开历史记录
+    patterns:
+      - "(?:打开|查看)?历史记录"
+      - "浏览历史"
+      - "历史"
+
+  - name: 查看下载
+    description: 打开下载管理
+    patterns:
+      - "(?:打开|查看)?下载"
+      - "下载管理"
+      - "下载列表"
+
+  - name: 刷新页面
+    description: 刷新当前网页
+    patterns:
+      - "刷新"
+      - "刷新页面"
+      - "重新加载"
+
+  - name: 返回上一页
+    description: 浏览器返回
+    patterns:
+      - "返回上一页"
+      - "后退"
+
+  - name: 关闭当前标签
+    description: 关闭当前标签页
+    patterns:
+      - "关闭标签"
+      - "关闭当前页"
+      - "关闭网页"
