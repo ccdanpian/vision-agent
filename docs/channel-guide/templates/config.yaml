@@ -1,0 +1,40 @@
+# apps/{channel}/config.yaml
+# {Channel}频道配置模板
+#
+# 使用说明：
+# 1. 将 {channel} 替换为小写频道名称（如 douyin, weibo）
+# 2. 将 {Channel} 替换为显示名称（如 抖音, 微博）
+# 3. 将 {PACKAGE} 替换为应用包名（如 com.ss.android.ugc.aweme）
+# 4. 根据应用特点添加关键词
+
+# 频道标识（英文小写，用于代码引用）
+name: {channel}
+
+# 显示名称（中文，用于用户界面）
+display_name: {Channel}
+
+# Android 应用包名
+package: {PACKAGE}
+
+# 任务匹配关键词
+# 这些词出现在用户任务中时，会提高匹配到本频道的概率
+# 权重：每个命中 +0.1，最多 +0.4
+keywords:
+  - {channel}           # 英文名
+  - {Channel}           # 中文名
+  # TODO: 添加更多关键词
+  # - 短视频
+  # - 直播
+  # - 刷视频
+
+# 频道描述
+description: {Channel}应用自动化操作
+
+# 可选：自定义 Handler 类名（默认使用 Handler）
+# handler_class: CustomHandler
+
+# 可选：启用的功能
+# features:
+#   - workflow           # 工作流支持
+#   - ai_navigation      # AI 辅助导航
+#   - screen_detection   # 界面检测

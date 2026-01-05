@@ -1,0 +1,56 @@
+# apps/{channel}/images/aliases.yaml
+# 参考图中文别名配置模板
+#
+# 使用说明：
+# 1. 将 {channel} 替换为小写频道名称（如 douyin, weibo）
+# 2. 添加中文别名到对应的参考图文件名
+# 3. 别名支持中文，便于在任务描述和代码中使用
+
+aliases:
+  # ============================================================
+  # 操作元素（根目录参考图）
+  # ============================================================
+
+  # 导航按钮
+  首页按钮: {channel}_home_button
+  返回: {channel}_back
+  搜索: {channel}_search_button
+
+  # 功能按钮
+  # 发送按钮: {channel}_send_button
+  # 点赞: {channel}_like_button
+  # 评论: {channel}_comment_button
+  # 分享: {channel}_share_button
+
+  # 输入框
+  # 搜索框: {channel}_search_input
+  # 评论输入框: {channel}_comment_input
+
+  # ============================================================
+  # 界面验证（system/ 目录参考图）
+  # ============================================================
+
+  # 首页标识: system/{channel}_home_page
+  # 个人页标识: system/{channel}_profile_page
+  # 搜索页标识: system/{channel}_search_page
+
+  # ============================================================
+  # 联系人/用户（contacts/ 目录参考图）
+  # ============================================================
+
+  # 张华: contacts/{channel}_user_zhanghua
+  # 李明: contacts/{channel}_user_liming
+
+# ============================================================
+# 别名规则说明
+# ============================================================
+#
+# 1. 中文别名应简洁明了
+# 2. 同一参考图可以有多个别名
+# 3. 别名查找优先级：精确匹配 > 模糊匹配
+# 4. 支持子目录路径：contacts/xxx, system/xxx
+#
+# 示例用法：
+#   handler.get_image("返回")       # 返回 {channel}_back.png
+#   handler.get_image("张华")       # 返回 contacts/{channel}_user_zhanghua.png
+#   handler.get_image("首页标识")   # 返回 system/{channel}_home_page.png
