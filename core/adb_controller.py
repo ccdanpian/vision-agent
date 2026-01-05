@@ -32,7 +32,9 @@ class ADBController:
             cmd,
             capture_output=True,
             text=True,
-            timeout=timeout
+            timeout=timeout,
+            encoding='utf-8',
+            errors='ignore'
         )
 
     def connect(self) -> bool:
@@ -75,16 +77,72 @@ class ADBController:
         return self.device_address in result.stdout and "device" in result.stdout
 
     def get_screen_size(self) -> Tuple[int, int]:
-        """获取屏幕分辨率"""
+        """获取屏幕分辨率（优先使用 Override size）"""
         if self._screen_size:
             return self._screen_size
 
         result = self._run_adb("shell", "wm", "size")
-        match = re.search(r"(\d+)x(\d+)", result.stdout)
+        output = result.stdout
+
+        # 优先匹配 Override size（如果有）
+        override_match = re.search(r"Override size:\s*(\d+)x(\d+)", output)
+        if override_match:
+            self._screen_size = (int(override_match.group(1)), int(override_match.group(2)))
+            return self._screen_size
+
+        # 其次匹配 Physical size
+        physical_match = re.search(r"Physical size:\s*(\d+)x(\d+)", output)
+        if physical_match:
+            self._screen_size = (int(physical_match.group(1)), int(physical_match.group(2)))
+            return self._screen_size
+
+        # 兜底：匹配任意格式
+        match = re.search(r"(\d+)x(\d+)", output)
         if match:
             self._screen_size = (int(match.group(1)), int(match.group(2)))
             return self._screen_size
+
         raise RuntimeError("无法获取屏幕分辨率")
+
+    def get_screen_insets(self) -> dict:
+        """
+        动态获取状态栏和导航栏高度
+
+        Returns:
+            {"top": 状态栏高度, "bottom": 导航栏高度}
+        """
+        result = self._run_adb("shell", "dumpsys", "window", "windows", timeout=10)
+        output = result.stdout
+
+        screen_width, screen_height = self.get_screen_size()
+        top_inset = 0
+        bottom_inset = 0
+
+        # 方法1: 从 mAppBounds 获取应用内容区域 (最可靠)
+        # 格式: mAppBounds=Rect(0, 92 - 1080, 2276)
+        app_bounds_pattern = r"mAppBounds=Rect\((\d+),\s*(\d+)\s*-\s*(\d+),\s*(\d+)\)"
+        app_bounds_match = re.search(app_bounds_pattern, output)
+        if app_bounds_match:
+            top_inset = int(app_bounds_match.group(2))  # y1 = 92
+            bottom_y = int(app_bounds_match.group(4))   # y2 = 2276
+            bottom_inset = screen_height - bottom_y     # 2400 - 2276 = 124
+            return {"top": top_inset, "bottom": bottom_inset}
+
+        # 方法2: 备用 - 从 StatusBar 和 NavigationBar 的 Requested h= 获取
+        # 格式: Window{...StatusBar}:
+        #       ...
+        #       Requested w=1080 h=92
+        statusbar_pattern = r"StatusBar\}:.*?Requested w=\d+ h=(\d+)"
+        statusbar_match = re.search(statusbar_pattern, output, re.DOTALL)
+        if statusbar_match:
+            top_inset = int(statusbar_match.group(1))
+
+        navbar_pattern = r"NavigationBar\d*\}:.*?Requested w=\d+ h=(\d+)"
+        navbar_match = re.search(navbar_pattern, output, re.DOTALL)
+        if navbar_match:
+            bottom_inset = int(navbar_match.group(1))
+
+        return {"top": top_inset, "bottom": bottom_inset}
 
     def tap(self, x: int, y: int) -> bool:
         """
@@ -205,14 +263,37 @@ class ADBController:
 
     def get_current_app(self) -> Optional[str]:
         """获取当前前台应用包名"""
+        # 方法 1: 使用 dumpsys activity activities
         result = self._run_adb(
             "shell", "dumpsys", "activity", "activities",
             timeout=10
         )
-        # 解析输出获取当前应用
-        match = re.search(r"mResumedActivity.*?(\S+)/", result.stdout)
-        if match:
-            return match.group(1)
+        if result.stdout:
+            # 尝试多种匹配模式
+            patterns = [
+                r"mResumedActivity.*?(\S+)/",
+                r"topResumedActivity.*?(\S+)/",
+                r"ResumedActivity.*?(\S+)/",
+                r"mFocusedApp.*?(\S+)/",
+            ]
+            for pattern in patterns:
+                match = re.search(pattern, result.stdout)
+                if match:
+                    return match.group(1)
+
+        # 方法 2: 使用 dumpsys window
+        result = self._run_adb(
+            "shell", "dumpsys", "window", "windows",
+            timeout=10
+        )
+        if result.stdout:
+            match = re.search(r"mCurrentFocus.*?(\S+)/", result.stdout)
+            if match:
+                return match.group(1)
+            match = re.search(r"mFocusedApp.*?(\S+)/", result.stdout)
+            if match:
+                return match.group(1)
+
         return None
 
     def dial(self, phone_number: str) -> bool:

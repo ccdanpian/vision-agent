@@ -47,10 +47,12 @@ class OpenCVLocator:
 
     # 模板匹配阈值
     TEMPLATE_THRESHOLD = 0.75
-    # 特征点匹配阈值
-    FEATURE_THRESHOLD = 0.7
+    # 特征点匹配阈值（用于 Lowe's ratio test）
+    FEATURE_THRESHOLD = 0.9
+    # 特征点匹配最终置信度阈值
+    FEATURE_CONFIDENCE_THRESHOLD = 0.7
     # 多尺度匹配的缩放范围
-    SCALE_RANGE = (0.5, 1.5)
+    SCALE_RANGE = (0.8, 1.2)
     SCALE_STEPS = 10
 
     def __init__(self):
@@ -143,7 +145,8 @@ class OpenCVLocator:
     def _template_match(
         self,
         screenshot: np.ndarray,
-        template: np.ndarray
+        template: np.ndarray,
+        template_name: str = ""
     ) -> MatchResult:
         """
         模板匹配
@@ -168,7 +171,8 @@ class OpenCVLocator:
         result = cv2.matchTemplate(gray_screen, gray_template, cv2.TM_CCOEFF_NORMED)
         min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
 
-        self._log(f"模板匹配置信度: {max_val:.3f} (阈值: {self.TEMPLATE_THRESHOLD})")
+        name_suffix = f" [{template_name}]" if template_name else ""
+        self._log(f"模板匹配置信度: {max_val:.3f} (阈值: {self.TEMPLATE_THRESHOLD}){name_suffix}")
 
         if max_val >= self.TEMPLATE_THRESHOLD:
             top_left = max_loc
@@ -257,7 +261,8 @@ class OpenCVLocator:
     def _multi_scale_match(
         self,
         screenshot: np.ndarray,
-        template: np.ndarray
+        template: np.ndarray,
+        template_name: str = ""
     ) -> MatchResult:
         """
         多尺度模板匹配
@@ -301,7 +306,8 @@ class OpenCVLocator:
                 best_match = (max_loc, new_w, new_h)
                 best_scale = scale
 
-        self._log(f"多尺度匹配最佳置信度: {best_val:.3f}, 缩放: {best_scale:.2f}")
+        name_suffix = f" [{template_name}]" if template_name else ""
+        self._log(f"多尺度匹配最佳置信度: {best_val:.3f}, 缩放: {best_scale:.2f}{name_suffix}")
 
         if best_val >= self.TEMPLATE_THRESHOLD and best_match:
             top_left, matched_w, matched_h = best_match
@@ -432,6 +438,21 @@ class OpenCVLocator:
         # 计算置信度
         inliers = np.sum(mask) if mask is not None else 0
         confidence = inliers / len(good_matches) if good_matches else 0
+
+        # 检查置信度是否达到阈值
+        if confidence < self.FEATURE_CONFIDENCE_THRESHOLD:
+            self._log(f"特征点匹配置信度不足: {confidence:.3f} (阈值: {self.FEATURE_CONFIDENCE_THRESHOLD})")
+            return MatchResult(
+                success=False,
+                confidence=float(confidence),
+                method="feature",
+                details={
+                    "good_matches": len(good_matches),
+                    "inliers": int(inliers),
+                    "total_keypoints": len(kp1),
+                    "threshold": self.FEATURE_CONFIDENCE_THRESHOLD
+                }
+            )
 
         return MatchResult(
             success=True,

@@ -202,6 +202,66 @@ def test_match(ref_path: str, screenshot_path: str):
         print("\n✗ 未找到匹配元素")
 
 
+def test_opencv(ref_path: str, screenshot_path: str):
+    """测试 OpenCV 模板匹配（不需要 API）"""
+    print("\n" + "=" * 60)
+    print("测试: OpenCV 模板匹配（离线）")
+    print("=" * 60)
+
+    import cv2
+    from core.opencv_locator import OpenCVLocator
+
+    ref_img = Image.open(ref_path)
+    screenshot = Image.open(screenshot_path)
+
+    print(f"\n参考图: {ref_path} ({ref_img.size})")
+    print(f"截图: {screenshot_path} ({screenshot.size})")
+
+    # 转换为 OpenCV 格式
+    import numpy as np
+    ref_cv = cv2.cvtColor(np.array(ref_img), cv2.COLOR_RGB2BGR)
+    screen_cv = cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2BGR)
+
+    locator = OpenCVLocator()
+    ref_name = Path(ref_path).name
+
+    print("\n--- 1. 标准模板匹配 ---")
+    result1 = locator._template_match(screen_cv, ref_cv, ref_name)
+    print(f"  成功: {result1.success}")
+    print(f"  置信度: {result1.confidence:.3f}")
+    if result1.success:
+        print(f"  中心坐标: ({result1.center_x}, {result1.center_y})")
+
+    print("\n--- 2. 多尺度模板匹配 ---")
+    result2 = locator._multi_scale_match(screen_cv, ref_cv, ref_name)
+    print(f"  成功: {result2.success}")
+    print(f"  置信度: {result2.confidence:.3f}")
+    if result2.success:
+        print(f"  中心坐标: ({result2.center_x}, {result2.center_y})")
+        if result2.bbox:
+            scale = result2.bbox[2] / ref_cv.shape[1]
+            print(f"  匹配尺度: {scale:.2f}x")
+
+    print("\n--- 3. 特征点匹配 (ORB) ---")
+    result3 = locator._feature_match(screen_cv, ref_cv)
+    print(f"  成功: {result3.success}")
+    print(f"  置信度: {result3.confidence:.3f}")
+    if result3.success:
+        print(f"  中心坐标: ({result3.center_x}, {result3.center_y})")
+
+    print("\n" + "-" * 40)
+    print("总结:")
+    print("-" * 40)
+    methods = [
+        ("标准模板", result1),
+        ("多尺度", result2),
+        ("特征点", result3)
+    ]
+    for name, r in methods:
+        status = "✓" if r.success else "✗"
+        print(f"  {name}: {status} (置信度: {r.confidence:.3f})")
+
+
 def test_verify(image_path: str, expected_state: str):
     """测试验证器（需要 API）"""
     print("\n" + "=" * 60)
@@ -328,7 +388,8 @@ def main():
         print("\n如需测试真实 API，请使用以下命令：")
         print("  python test_planner.py plan <截图> <任务>")
         print("  python test_planner.py locate <截图> <元素描述>")
-        print("  python test_planner.py match <参考图> <截图>")
+        print("  python test_planner.py match <参考图> <截图>      # AI匹配")
+        print("  python test_planner.py opencv <参考图> <截图>     # OpenCV匹配(离线)")
         print("  python test_planner.py verify <截图> <期望状态>")
         print("  python test_planner.py flow <截图> <任务>")
         return
@@ -343,6 +404,9 @@ def main():
 
     elif cmd == "match" and len(args) >= 3:
         test_match(args[1], args[2])
+
+    elif cmd == "opencv" and len(args) >= 3:
+        test_opencv(args[1], args[2])
 
     elif cmd == "verify" and len(args) >= 3:
         test_verify(args[1], args[2])

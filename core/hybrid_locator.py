@@ -9,8 +9,10 @@ core/hybrid_locator.py
 4. 最后回退到 AI 视觉定位（慢、付费）
 """
 import cv2
+import shutil
 import numpy as np
 from pathlib import Path
+from datetime import datetime
 from typing import Optional, Tuple, Dict, Any, Callable
 from dataclasses import dataclass
 from enum import Enum
@@ -60,7 +62,8 @@ class HybridLocator:
     def __init__(
         self,
         ai_locator: Callable = None,
-        strategy: LocateStrategy = LocateStrategy.OPENCV_FIRST
+        strategy: LocateStrategy = LocateStrategy.OPENCV_FIRST,
+        debug_save: bool = True  # 默认开启调试保存
     ):
         """
         初始化混合定位器
@@ -68,11 +71,18 @@ class HybridLocator:
         Args:
             ai_locator: AI 定位函数
             strategy: 定位策略
+            debug_save: 是否保存调试图片到 temp 目录
         """
         self.opencv = OpenCVLocator()
         self.ai_locator = ai_locator
         self.strategy = strategy
         self._logger = None
+        self._debug_save = debug_save
+        self._debug_dir = Path("temp/locator_debug")
+
+        # 确保调试目录存在
+        if self._debug_save:
+            self._debug_dir.mkdir(parents=True, exist_ok=True)
 
         # 统计信息
         self._stats = {
@@ -101,6 +111,38 @@ class HybridLocator:
     def set_strategy(self, strategy: LocateStrategy):
         """设置定位策略"""
         self.strategy = strategy
+
+    def set_debug_save(self, enabled: bool):
+        """开启/关闭调试图片保存"""
+        self._debug_save = enabled
+        if enabled:
+            self._debug_dir.mkdir(parents=True, exist_ok=True)
+
+    def _save_debug_images(self, screenshot: bytes, template_path: Path):
+        """
+        保存调试图片
+
+        Args:
+            screenshot: 截图字节数据
+            template_path: 模板图片路径
+        """
+        try:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
+            template_name = template_path.stem
+
+            # 保存截图
+            screenshot_path = self._debug_dir / f"screenshot_{template_name}_{timestamp}.png"
+            with open(screenshot_path, 'wb') as f:
+                f.write(screenshot)
+
+            # 复制参考图
+            ref_path = self._debug_dir / f"reference_{template_name}_{timestamp}.png"
+            shutil.copy(template_path, ref_path)
+
+            self._log(f"调试图片已保存: {template_name}_{timestamp}")
+
+        except Exception as e:
+            self._log(f"保存调试图片失败: {e}")
 
     def locate(
         self,
@@ -170,6 +212,126 @@ class HybridLocator:
             details={"tried_variants": [p.name for p in template_paths]}
         )
 
+    def locate_multiple_parallel(
+        self,
+        screenshot: bytes,
+        targets: Dict[str, list],
+    ) -> Dict[str, LocateResult]:
+        """
+        并行检测多个目标（仅 OpenCV，用于预置流程加速）
+
+        Args:
+            screenshot: 截图字节数据
+            targets: 目标字典，格式为 {"目标名": [模板路径列表], ...}
+                     例如: {"home_button": [path1, path2], "back": [path3]}
+
+        Returns:
+            结果字典，格式为 {"目标名": LocateResult, ...}
+        """
+        import concurrent.futures
+
+        results = {}
+
+        # 解码截图
+        nparr = np.frombuffer(screenshot, np.uint8)
+        screenshot_cv = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if screenshot_cv is None:
+            for name in targets:
+                results[name] = LocateResult(success=False, details={"error": "截图解码失败"})
+            return results
+
+        def detect_single_variant(target_name: str, template_path: Path) -> Tuple[str, Path, LocateResult]:
+            """检测单个变体"""
+            try:
+                template = cv2.imread(str(template_path))
+                if template is None:
+                    self._log(f"  [检测] {target_name}/{template_path.name}: 无法读取图片")
+                    return target_name, template_path, LocateResult(success=False)
+
+                # 尝试模板匹配
+                variant_name = template_path.name
+                match_result = self.opencv._template_match(screenshot_cv, template, variant_name)
+                if match_result.success:
+                    self._log(f"  [匹配成功] {target_name}/{variant_name}: 模板匹配 置信度={match_result.confidence:.3f}")
+                    return target_name, template_path, LocateResult(
+                        success=True,
+                        center_x=match_result.center_x,
+                        center_y=match_result.center_y,
+                        confidence=match_result.confidence,
+                        method_used="opencv_template",
+                        details={"matched_variant": variant_name}
+                    )
+
+                # 尝试多尺度匹配
+                match_result = self.opencv._multi_scale_match(screenshot_cv, template, variant_name)
+                if match_result.success:
+                    self._log(f"  [匹配成功] {target_name}/{variant_name}: 多尺度匹配 置信度={match_result.confidence:.3f}")
+                    return target_name, template_path, LocateResult(
+                        success=True,
+                        center_x=match_result.center_x,
+                        center_y=match_result.center_y,
+                        confidence=match_result.confidence,
+                        method_used="opencv_multi_scale",
+                        details={"matched_variant": template_path.name}
+                    )
+            except Exception as e:
+                self._log(f"  [检测异常] {target_name}/{template_path.name}: {e}")
+
+            return target_name, template_path, LocateResult(success=False)
+
+        # 构建所有检测任务（目标+变体的笛卡尔积）
+        all_tasks = []
+        for name, paths in targets.items():
+            for path in paths:
+                all_tasks.append((name, path))
+
+        self._log(f"并行检测任务: {[(n, p.name) for n, p in all_tasks]}")
+
+        # 并行检测所有目标的所有变体
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(all_tasks)) as executor:
+            futures = {
+                executor.submit(detect_single_variant, name, path): (name, path)
+                for name, path in all_tasks
+            }
+
+            # 收集结果，选择置信度最高的成功匹配
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    target_name, template_path, result = future.result()
+                    # 决定是否更新结果
+                    should_update = False
+                    if target_name not in results:
+                        # 第一个结果
+                        should_update = True
+                    elif result.success:
+                        if not results[target_name].success:
+                            # 新结果成功，旧结果失败
+                            should_update = True
+                        elif result.confidence > results[target_name].confidence:
+                            # 新结果置信度更高
+                            should_update = True
+                            self._log(f"  [更优匹配] {target_name}: {template_path.name} ({result.confidence:.3f}) > 之前 ({results[target_name].confidence:.3f})")
+
+                    if should_update:
+                        results[target_name] = result
+                        if result.success:
+                            self._log(f"  [结果] {target_name}: 成功 (变体={template_path.name})")
+                except Exception as e:
+                    target_name, _ = futures[future]
+                    self._log(f"  [结果异常] {target_name}: {e}")
+                    if target_name not in results:
+                        results[target_name] = LocateResult(success=False, details={"error": str(e)})
+
+        # 确保所有目标都有结果
+        for name in targets:
+            if name not in results:
+                results[name] = LocateResult(success=False, details={"tried": [p.name for p in targets[name]]})
+
+        # 汇总日志
+        self._log(f"  [汇总] 检测结果: {[(k, v.success) for k, v in results.items()]}")
+
+        return results
+
     def _locate_single(
         self,
         screenshot: bytes,
@@ -179,7 +341,11 @@ class HybridLocator:
         """定位单个模板"""
 
         if strategy == LocateStrategy.OPENCV_ONLY:
-            return self._locate_opencv(screenshot, template_path)
+            result = self._locate_opencv(screenshot, template_path)
+            # 只在失败时保存调试图片
+            if not result.success and self._debug_save:
+                self._save_debug_images(screenshot, template_path)
+            return result
 
         elif strategy == LocateStrategy.AI_ONLY:
             return self._locate_ai(screenshot, template_path)
@@ -189,6 +355,10 @@ class HybridLocator:
             result = self._locate_opencv(screenshot, template_path)
             if result.success:
                 return result
+
+            # OpenCV 失败，保存调试图片
+            if self._debug_save:
+                self._save_debug_images(screenshot, template_path)
 
             # 2. 回退到 AI
             self._log("OpenCV 失败，回退到 AI")
@@ -215,11 +385,10 @@ class HybridLocator:
         使用 OpenCV 定位
 
         尝试顺序：
-        1. 模板匹配
-        2. 多尺度匹配
-        3. 特征点匹配
+        1. 模板匹配（快速）
+        2. 多尺度匹配（处理缩放）
+        3. 特征点匹配（处理旋转/变形）
         """
-        # 方法列表
         methods = [
             (MatchMethod.TEMPLATE, "opencv_template"),
             (MatchMethod.MULTI_SCALE, "opencv_multi_scale"),

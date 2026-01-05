@@ -47,13 +47,43 @@
    → 按返回键 → 回到聊天列表 → 找张三
 
 3. **当前在聊天列表**（有底部导航栏，显示多个会话）
-   → 能看到张三？点击张三 / 看不到？搜索张三
+   → **优先在列表中直接查找张三**（用 contacts/张三 参考图匹配）
+   → **只有找不到时才使用搜索功能**
 
 4. **当前在微信其他页面**（通讯录/发现/我）
-   → 点击底部"微信"Tab → 找张三
+   → 点击底部"微信"Tab → 先在列表找张三 → 找不到再搜索
 
 5. **当前不在微信**
    → launch_app 启动微信
+
+**重要：发消息时查找联系人的优先级**
+1. 首先尝试在当前聊天列表中**直接点击联系人**（使用 contacts/联系人名 参考图）
+2. 只有当列表中找不到该联系人时，才使用**搜索功能**
+3. 搜索是备选方案，不是首选！
+
+**发消息示例（当前在聊天列表）：**
+```json
+{
+  "steps": [
+    {"step": 1, "action": "tap", "target_ref": "contacts/张华", "description": "在聊天列表中点击张华"},
+    {"step": 2, "action": "input_text", "target_ref": "wechat_chat_input", "params": {"text": "你好"}, "description": "输入消息"},
+    {"step": 3, "action": "tap", "target_ref": "wechat_chat_send", "description": "点击发送按钮"}
+  ]
+}
+```
+
+**发消息示例（当前在其他页面，需要先回到聊天列表）：**
+```json
+{
+  "steps": [
+    {"step": 1, "action": "tap", "target_ref": "wechat_home_button", "description": "点击微信Tab回到聊天列表"},
+    {"step": 2, "action": "tap", "target_ref": "contacts/张华", "description": "在聊天列表中点击张华",
+     "fallback": {"action": "tap", "target_ref": "wechat_search_button", "description": "列表中找不到则点击搜索"}},
+    {"step": 3, "action": "input_text", "target_ref": "wechat_chat_input", "params": {"text": "你好"}, "description": "输入消息"},
+    {"step": 4, "action": "tap", "target_ref": "wechat_chat_send", "description": "点击发送按钮"}
+  ]
+}
+```
 
 ---
 
@@ -89,7 +119,7 @@
       "description": "点击发现Tab",
       "fallback": {"action": "press_key", "params": {"keycode": 4}, "description": "按返回键"}
     },
-    {"step": 3, "action": "tap", "target_ref": "wechat_moments", "description": "点击朋友圈入口"},
+    {"step": 3, "action": "tap", "target_ref": "wechat_moments_entry", "description": "点击朋友圈入口"},
     {"step": 4, "action": "tap", "target_ref": "wechat_moments_camera", "description": "点击发布按钮"}
   ]
 }
@@ -256,9 +286,10 @@
 ## 参考图列表（优先使用，比动态定位快）
 
 **底部导航栏：**
-- wechat_tab_contacts - 通讯录Tab
-- wechat_tab_discover - 发现Tab
-- wechat_tab_me - 我Tab
+- wechat_home_button - 微信Tab（聊天主页）
+- wechat_tab_contacts_button - 通讯录Tab
+- wechat_tab_discover_button - 发现Tab
+- wechat_tab_me_button - 我Tab
 
 **顶部按钮：**
 - wechat_add_button - 右上角+号
@@ -285,6 +316,9 @@
 - wechat_add_contact_button - 添加到通讯录按钮
 - wechat_add_send_button - 发送申请按钮
 
+> 注：部分参考图有 _v1 变体版本（如 wechat_back_v1、wechat_tab_discover_button_v1），
+> 用于多设备适配，系统会自动依次尝试匹配。
+
 **通讯录：**
 - wechat_contacts_new_friend - 新的朋友
 - wechat_contacts_group_chat - 群聊
@@ -292,8 +326,8 @@
 - wechat_contacts_official - 公众号
 
 **朋友圈：**
-- wechat_moments - 朋友圈入口
-- wechat_moments_camera - 发朋友圈相机
+- wechat_moments_entry - 朋友圈入口（发现页）
+- wechat_moments_camera - 发朋友圈相机图标
 - wechat_moments_publish - 发表按钮
 
 **常用联系人（存放在 contacts/ 目录）：**
@@ -325,7 +359,7 @@
 {
   "step": 3,
   "action": "tap",
-  "target_ref": "wechat_tab_discover",
+  "target_ref": "wechat_tab_discover_button",
   "description": "点击发现Tab",
   "fallback": {
     "action": "press_key",

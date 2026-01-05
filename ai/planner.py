@@ -39,6 +39,7 @@ class ActionName(Enum):
     LAUNCH_APP = "launch_app"  # 直接启动 App（使用包名）
     CALL = "call"            # 直接拨打电话
     OPEN_URL = "open_url"    # 打开网址
+    SCREENSHOT = "screenshot"  # 截屏保存
 
 
 @dataclass
@@ -236,7 +237,8 @@ class Planner:
         task: str,
         screenshot: Image.Image,
         history: Optional[List[StepPlan]] = None,
-        system_prompt: Optional[str] = None
+        system_prompt: Optional[str] = None,
+        module_images: Optional[List[str]] = None
     ) -> TaskPlan:
         """
         生成任务执行计划
@@ -263,7 +265,13 @@ class Planner:
                 self._log(f"    {category}: {len(items)} 个")
 
         # 构建提示词
-        prompt = self._build_prompt(task, available_refs, history)
+        if module_images:
+            self._log(f"  模块参考图: {len(module_images)} 个")
+            self._log(f"    前10个: {module_images[:10]}")
+        else:
+            self._log(f"  模块参考图: 无")
+
+        prompt = self._build_prompt(task, available_refs, history, module_images)
 
         # 使用自定义或默认系统提示词
         sys_prompt = system_prompt if system_prompt else self._get_system_prompt()
@@ -372,7 +380,8 @@ input_text 动作会自动处理输入框激活：
         self,
         task: str,
         available_refs: Dict[str, List[str]],
-        history: Optional[List[StepPlan]] = None
+        history: Optional[List[StepPlan]] = None,
+        module_images: Optional[List[str]] = None
     ) -> str:
         """构建用户提示词"""
         # 格式化可用参考图
@@ -397,6 +406,16 @@ UI元素类 (target_type=ui):
 {states_str if states_str else "  (暂无预置状态图)"}
 
 注意: 如果需要的参考图不在列表中，请使用 "dynamic:具体描述" 格式。"""
+
+        # 追加模块参考图提示
+        if module_images:
+            module_images_str = "\n".join(f"  - {r}" for r in module_images[:20])
+            module_hint = f"\n\n【模块参考图库（优先使用）】\n{module_images_str}\n\n请优先使用上述名称作为 target_ref（禁止对这些元素使用 dynamic: 前缀）。"
+            prompt += module_hint
+            self._log(f"  追加模块参考图提示: {len(module_images)} 个图片名称")
+            self._log(f"  提示内容预览: {module_hint[:200]}...")
+        else:
+            self._log(f"  未追加模块参考图提示（module_images 为空）")
 
         # 添加历史记录
         if history:
@@ -590,7 +609,9 @@ UI元素类 (target_type=ui):
         current_screenshot: Image.Image,
         failed_step: StepPlan,
         failure_reason: str,
-        executed_steps: List[StepPlan]
+        executed_steps: List[StepPlan],
+        system_prompt: Optional[str] = None,
+        module_images: Optional[List[str]] = None
     ) -> TaskPlan:
         """
         重新规划（在步骤失败后）
@@ -601,6 +622,8 @@ UI元素类 (target_type=ui):
             failed_step: 失败的步骤
             failure_reason: 失败原因
             executed_steps: 已执行的步骤
+            system_prompt: 自定义系统提示词（模块特定）
+            module_images: 模块参考图列表
 
         Returns:
             新的 TaskPlan
@@ -617,4 +640,10 @@ UI元素类 (target_type=ui):
 
 请分析当前屏幕状态，重新规划完成任务的步骤。"""
 
-        return self.plan(context, current_screenshot, executed_steps)
+        return self.plan(
+            context,
+            current_screenshot,
+            history=executed_steps,
+            system_prompt=system_prompt,
+            module_images=module_images
+        )

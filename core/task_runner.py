@@ -17,7 +17,7 @@ from enum import Enum
 from PIL import Image
 import io
 
-from config import LLMConfig, get_screenshot_wait
+from config import LLMConfig, get_screenshot_wait, OPERATION_DELAY
 from core.adb_controller import ADBController
 from core.hybrid_locator import HybridLocator, LocateStrategy, create_hybrid_locator
 from core.execution_strategy import (
@@ -131,6 +131,9 @@ class TaskRunner:
         # 屏幕尺寸缓存
         self._screen_size: Optional[tuple] = None
 
+        # 屏幕边距缓存（状态栏和导航栏高度）
+        self._screen_insets: Optional[dict] = None
+
     def set_logger(self, logger_func: Callable[[str], None]):
         """设置日志回调函数"""
         self._logger = logger_func
@@ -193,6 +196,38 @@ class TaskRunner:
         self._log(f"⏱ 截图: {elapsed:.0f}ms")
         return img
 
+    def _get_screen_insets(self) -> dict:
+        """获取屏幕边距（状态栏和导航栏高度），带缓存"""
+        if self._screen_insets is None:
+            self._screen_insets = self.adb.get_screen_insets()
+            self._log(f"屏幕边距: top={self._screen_insets['top']}px, bottom={self._screen_insets['bottom']}px")
+        return self._screen_insets
+
+    def _capture_screenshot_cropped(self, wait_before: float = None) -> tuple:
+        """
+        截取当前屏幕并裁剪掉状态栏和导航栏区域
+
+        Args:
+            wait_before: 截图前等待时间（秒）
+
+        Returns:
+            (cropped_image, top_offset): 裁剪后的图片和顶部偏移量
+        """
+        # 获取原始截图
+        screenshot = self._capture_screenshot(wait_before)
+
+        # 获取边距
+        insets = self._get_screen_insets()
+        top = insets['top']
+        bottom = insets['bottom']
+
+        # 裁剪
+        width, height = screenshot.size
+        cropped = screenshot.crop((0, top, width, height - bottom))
+
+        self._log(f"裁剪截图: {width}x{height} -> {cropped.size[0]}x{cropped.size[1]} (去除 top={top}, bottom={bottom})")
+        return cropped, top
+
     def run(self, task: str) -> TaskResult:
         """
         执行任务
@@ -214,6 +249,31 @@ class TaskRunner:
                 self._current_handler = handler
                 self._log(f"路由到模块: {handler.module_info.name} (匹配度: {score:.2f})")
 
+                # 设置 TaskRunner 引用（用于工作流执行）
+                if hasattr(handler, 'set_task_runner'):
+                    handler.set_task_runner(self)
+
+                # 优先尝试工作流执行（预定义的标准路径）
+                if hasattr(handler, 'execute_task_with_workflow'):
+                    workflow_result = handler.execute_task_with_workflow(task)
+                    if workflow_result:
+                        if workflow_result.get("success"):
+                            self._log(f"工作流执行成功")
+                            return TaskResult(
+                                status=TaskStatus.SUCCESS,
+                                total_time=time.time() - start_time
+                            )
+                        elif "missing_params" not in workflow_result:
+                            # 工作流执行失败（非参数缺失），返回失败
+                            self._log(f"工作流执行失败: {workflow_result.get('message')}")
+                            return TaskResult(
+                                status=TaskStatus.FAILED,
+                                total_time=time.time() - start_time,
+                                error_message=workflow_result.get("message", "工作流执行失败")
+                            )
+                        # 参数缺失，继续使用 AI 规划
+                        self._log(f"工作流参数不完整，回退到 AI 规划")
+
                 # 尝试匹配简单任务模板
                 # 只有任务足够简单（无分隔符、无多动作词）且有 simple: true 的模板才会匹配
                 if handler._is_simple_task(task):
@@ -234,6 +294,15 @@ class TaskRunner:
                 else:
                     self._log("检测到复合任务，交给 AI 规划器处理")
 
+        # 确保微信在前台并回到首页（如果是微信模块）
+        if handler and hasattr(handler, 'workflow_executor') and handler.workflow_executor:
+            self._log("执行预设步骤：确保微信在消息页面...")
+            if not handler.workflow_executor._ensure_wechat_running():
+                return TaskResult(
+                    status=TaskStatus.FAILED,
+                    error_message="无法启动微信或回到首页"
+                )
+
         # 截取当前屏幕
         try:
             screenshot = self._capture_screenshot()
@@ -245,12 +314,17 @@ class TaskRunner:
             )
 
         # 生成任务计划（使用模块特定的 prompt 如果有的话）
+        # 保存 prompt 和 module_images，用于可能的重新规划
+        custom_prompt = None
+        module_images = None
+
         try:
             plan_start = time.time()
             if handler:
-                # 使用模块的 planner prompt
+                # 使用模块的 planner prompt，并传递模块的参考图列表
                 custom_prompt = handler.get_planner_prompt()
-                plan = self.planner.plan(task, screenshot, system_prompt=custom_prompt)
+                module_images = handler.get_available_images()
+                plan = self.planner.plan(task, screenshot, system_prompt=custom_prompt, module_images=module_images)
             else:
                 plan = self.planner.plan(task, screenshot)
             plan_elapsed = (time.time() - plan_start) * 1000
@@ -311,6 +385,13 @@ class TaskRunner:
             self._log(f"    策略: Level {strategy.level.value} ({strategy.level.name})")
 
             result = self._execute_step_with_strategy(step, strategy, executed_steps)
+
+            # 如果失败，等待后重试一次
+            if result.status == StepStatus.FAILED:
+                self._log(f"  步骤失败，等待 {OPERATION_DELAY}s 后重试...")
+                time.sleep(OPERATION_DELAY)
+                result = self._execute_step_with_strategy(step, strategy, executed_steps)
+
             step_results.append(result)
 
             step_time = (result.end_time - result.start_time) * 1000
@@ -332,7 +413,9 @@ class TaskRunner:
                             current_screenshot,
                             step,
                             result.error_message,
-                            executed_steps
+                            executed_steps,
+                            system_prompt=custom_prompt,
+                            module_images=module_images
                         )
                         if new_plan.steps:
                             # 用新规划的步骤替换，从头开始执行新步骤
@@ -352,6 +435,15 @@ class TaskRunner:
                         total_time=time.time() - start_time,
                         error_message=result.error_message
                     )
+
+                # 默认：遇到失败立即停止，避免继续执行造成误操作
+                return TaskResult(
+                    status=TaskStatus.FAILED,
+                    plan=plan,
+                    step_results=step_results,
+                    total_time=time.time() - start_time,
+                    error_message=result.error_message
+                )
 
             batch_idx += 1
 
@@ -435,6 +527,141 @@ class TaskRunner:
             total_time=total_time
         )
 
+    # WeChat 动态描述到参考图的映射（中文描述 -> 参考图名称）
+    _WECHAT_TARGET_MAPPING = {
+        # 底部 Tab
+        "微信": "wechat_home_button",
+        "微信Tab": "wechat_home_button",
+        "聊天": "wechat_home_button",
+        "聊天Tab": "wechat_home_button",
+        "发现": "wechat_tab_discover_button",
+        "发现Tab": "wechat_tab_discover_button",
+        "发现tab": "wechat_tab_discover_button",
+        "通讯录": "wechat_tab_contacts_button",
+        "通讯录Tab": "wechat_tab_contacts_button",
+        "我": "wechat_tab_me_button",
+        "我Tab": "wechat_tab_me_button",
+        # 朋友圈相关
+        "朋友圈": "wechat_moments_entry",
+        "朋友圈入口": "wechat_moments_entry",
+        "朋友圈输入框": "wechat_moments_input_box",
+        "朋友圈文字输入框": "wechat_moments_input_box",
+        "相机图标": "wechat_moments_camera",
+        "发朋友圈相机": "wechat_moments_camera",
+        "朋友圈相机": "wechat_moments_camera",
+        "添加图片": "wechat_moments_pic_add_start",
+        "选择图片": "wechat_moments_pic_add_start",
+        "完成选图": "wechat_moments_pic_add_done",
+        "图片添加完成": "wechat_moments_pic_add_done",
+        "发表按钮": "wechat_moments_publish",
+        "发布按钮": "wechat_moments_publish",
+        # 顶部按钮
+        "+号": "wechat_add_button",
+        "+号按钮": "wechat_add_button",
+        "加号": "wechat_add_button",
+        "添加按钮": "wechat_add_button",
+        "搜索": "wechat_search_button",
+        "搜索按钮": "wechat_search_button",
+        "返回": "wechat_back",
+        "返回按钮": "wechat_back",
+        # +号菜单
+        "扫一扫": "wechat_menu_scan",
+        "添加朋友": "wechat_menu_add_friend",
+        "发起群聊": "wechat_menu_group_chat",
+        "收付款": "wechat_menu_receive_payment",
+        # 聊天界面
+        "输入框": "wechat_chat_input",
+        "聊天输入框": "wechat_chat_input",
+        "发送": "wechat_chat_send",
+        "发送按钮": "wechat_chat_send",
+        "语音按钮": "wechat_chat_voice",
+        "表情按钮": "wechat_chat_emoji",
+        "更多按钮": "wechat_chat_more",
+        # 添加好友流程
+        "搜索输入框": "wechat_add_search_input",
+        "添加到通讯录": "wechat_add_contact_button",
+        "发送申请": "wechat_add_send_button",
+        # 页面状态验证（用于 verify_ref）
+        "微信首页": "system/wechat_home_page",
+        "首页": "system/wechat_home_page",
+        "聊天列表": "system/wechat_home_page",
+        "微信主页": "system/wechat_home_page",
+        "通讯录页面": "system/wechat_contacts_page",
+        "联系人页面": "system/wechat_contacts_page",
+        "联系人列表": "system/wechat_contacts_page",
+        "发现页面": "system/wechat_discover_page",
+        "发现页": "system/wechat_discover_page",
+        "我的页面": "system/wechat_me_page",
+        "我页面": "system/wechat_me_page",
+        "个人页面": "system/wechat_me_page",
+    }
+
+    def _normalize_target_ref(self, target_ref: Optional[str]) -> Optional[str]:
+        """
+        规范化 target_ref，将动态描述映射到参考图名称
+
+        如果 target_ref 以 "dynamic:" 开头，检查描述是否匹配已知的参考图，
+        如果匹配则返回参考图名称（不带 dynamic: 前缀），否则返回原值。
+
+        Args:
+            target_ref: 原始的 target_ref
+
+        Returns:
+            规范化后的 target_ref
+        """
+        if target_ref is None:
+            return None
+
+        if not target_ref.startswith("dynamic:"):
+            return target_ref
+
+        # 提取描述部分
+        description = target_ref[8:]  # 去掉 "dynamic:" 前缀
+        self._log(f"  [规范化] 检测到动态描述: '{description}'")
+
+        # 尝试直接匹配
+        if description in self._WECHAT_TARGET_MAPPING:
+            mapped = self._WECHAT_TARGET_MAPPING[description]
+            self._log(f"  [规范化] 直接匹配成功: '{description}' -> '{mapped}'")
+            return mapped
+
+        # 尝试模糊匹配（包含关系），优先匹配更长的键
+        best_match = None
+        best_match_len = 0
+        for key, value in self._WECHAT_TARGET_MAPPING.items():
+            if key in description or description in key:
+                # 优先选择更长的匹配（更具体）
+                if len(key) > best_match_len:
+                    best_match = (key, value)
+                    best_match_len = len(key)
+
+        if best_match:
+            self._log(f"  [规范化] 模糊匹配成功: '{description}' 包含 '{best_match[0]}' -> '{best_match[1]}'")
+            return best_match[1]
+
+        # 如果有当前处理器，尝试从模块获取映射
+        if self._current_handler:
+            module_mapping = getattr(self._current_handler, 'target_ref_mapping', {})
+            if description in module_mapping:
+                mapped = module_mapping[description]
+                self._log(f"  [规范化] 模块映射匹配: '{description}' -> '{mapped}'")
+                return mapped
+            # 模糊匹配，优先匹配更长的键
+            best_match = None
+            best_match_len = 0
+            for key, value in module_mapping.items():
+                if key in description or description in key:
+                    if len(key) > best_match_len:
+                        best_match = (key, value)
+                        best_match_len = len(key)
+            if best_match:
+                self._log(f"  [规范化] 模块模糊匹配: '{description}' 包含 '{best_match[0]}' -> '{best_match[1]}'")
+                return best_match[1]
+
+        # 无匹配，返回原值
+        self._log(f"  [规范化] 无匹配，保留原值: '{target_ref}'")
+        return target_ref
+
     def _dict_to_step(self, step_dict: Dict[str, Any], step_num: int) -> Optional[StepPlan]:
         """
         将字典格式的步骤转换为 StepPlan
@@ -461,7 +688,7 @@ class TaskRunner:
             "launch_app": ActionName.LAUNCH_APP,
             "call": ActionName.CALL,
             "open_url": ActionName.OPEN_URL,
-            "screenshot": ActionName.WAIT,  # 截图当作等待处理
+            "screenshot": ActionName.SCREENSHOT,  # 截屏保存
         }
 
         action = action_map.get(action_str.lower())
@@ -499,11 +726,20 @@ class TaskRunner:
         elif action == ActionName.OPEN_URL:
             params["url"] = step_dict.get("url", "")
 
+        elif action == ActionName.SCREENSHOT:
+            params["save_path"] = step_dict.get("save_path", step_dict.get("path", ""))
+
+        # 规范化 target_ref，将动态描述映射到参考图名称
+        raw_target_ref = step_dict.get("target_ref")
+        normalized_target_ref = self._normalize_target_ref(raw_target_ref)
+        if normalized_target_ref != raw_target_ref:
+            self._log(f"  target_ref 规范化: '{raw_target_ref}' -> '{normalized_target_ref}'")
+
         return StepPlan(
             step=step_num,
             action=action,
             description=step_dict.get("description", ""),
-            target_ref=step_dict.get("target_ref"),
+            target_ref=normalized_target_ref,
             params=params,
             wait_before=int(step_dict.get("wait_before", 0)),
             wait_after=int(step_dict.get("wait_after", 500)),
@@ -762,6 +998,8 @@ class TaskRunner:
             return self._execute_call(step)
         elif action == ActionName.OPEN_URL:
             return self._execute_open_url(step)
+        elif action == ActionName.SCREENSHOT:
+            return self._execute_screenshot(step)
         else:
             self._log(f"未知动作类型: {action}")
             return False
@@ -1220,6 +1458,37 @@ class TaskRunner:
 
         return result.returncode == 0
 
+    def _execute_screenshot(self, step: StepPlan) -> bool:
+        """
+        截屏保存
+
+        保存当前屏幕截图到指定路径。
+        """
+        import os
+        from datetime import datetime
+
+        # 获取保存路径
+        save_path = step.params.get("save_path", "")
+
+        if not save_path:
+            # 默认保存到 temp 目录，使用时间戳命名
+            temp_dir = Path(__file__).parent.parent / "temp"
+            temp_dir.mkdir(exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            save_path = str(temp_dir / f"screenshot_{timestamp}.png")
+
+        # 截图
+        screenshot = self._capture_screenshot()
+
+        # 保存
+        try:
+            screenshot.save(save_path)
+            self._log(f"截图已保存: {save_path}")
+            return True
+        except Exception as e:
+            self._log(f"截图保存失败: {e}")
+            return False
+
     def _locate_target(
         self,
         step: StepPlan,
@@ -1247,7 +1516,15 @@ class TaskRunner:
         target_type = step.target_type
 
         self._log(f"===== 定位目标 =====")
-        self._log(f"  目标: {target_ref}")
+        self._log(f"  原始目标: {target_ref}")
+
+        # 规范化 target_ref，将动态描述映射到参考图名称
+        if target_ref:
+            normalized_ref = self._normalize_target_ref(target_ref)
+            if normalized_ref != target_ref:
+                self._log(f"  规范化后: {normalized_ref}")
+                target_ref = normalized_ref
+
         self._log(f"  类型: {target_type.value if target_type else 'N/A'}")
         self._log(f"  描述: {step.description}")
 

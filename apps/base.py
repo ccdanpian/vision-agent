@@ -150,8 +150,8 @@ class ModuleAssets:
 
         支持多设备适配：
         - wechat_add_button.png (主图)
+        - wechat_add_button_v1.png (变体1)
         - wechat_add_button_v2.png (变体2)
-        - wechat_add_button_v3.png (变体3)
 
         Args:
             name: 参考图名称
@@ -169,11 +169,11 @@ class ModuleAssets:
         # 检查别名
         actual_name = self._aliases.get(name, name)
 
-        # 查找变体 (_v2, _v3, ...)
+        # 查找变体 (_v1, _v2, _v3, ...)
         if not self.images_dir.exists():
             return variants
 
-        for i in range(2, 10):  # 支持最多 9 个变体
+        for i in range(1, 10):  # 支持最多 9 个变体（从 _v1 开始）
             variant_name = f"{actual_name}_v{i}"
             for ext in ['.png', '.jpg', '.jpeg', '.webp']:
                 path = self.images_dir / f"{variant_name}{ext}"
@@ -196,12 +196,14 @@ class ModuleAssets:
             if file.is_file() and file.suffix.lower() in valid_exts:
                 images.append(file.stem)
 
-        # contacts 子目录
-        contacts_dir = self.images_dir / "contacts"
-        if contacts_dir.exists():
-            for file in contacts_dir.iterdir():
-                if file.is_file() and file.suffix.lower() in valid_exts:
-                    images.append(f"contacts/{file.stem}")
+        # 扫描子目录（contacts, system 等）
+        subdirs = ["contacts", "system"]
+        for subdir in subdirs:
+            subdir_path = self.images_dir / subdir
+            if subdir_path.exists():
+                for file in subdir_path.iterdir():
+                    if file.is_file() and file.suffix.lower() in valid_exts:
+                        images.append(f"{subdir}/{file.stem}")
 
         return sorted(images)
 
@@ -339,10 +341,18 @@ class AppHandler(ABC):
         # 使用命中数而非比例，每个命中加 0.1，最多 0.4
         keyword_hits = 0
         for keyword in self.module_info.keywords:
-            if keyword.lower() in task_lower:
+            keyword_lower = keyword.lower()
+            # 检查是否为正则表达式模式（包含 . * + ? 等）
+            if any(c in keyword for c in '.*+?[]()'):
+                try:
+                    if re.search(keyword_lower, task_lower):
+                        keyword_hits += 1
+                except re.error:
+                    pass
+            elif keyword_lower in task_lower:
                 keyword_hits += 1
                 # 完全匹配给更高分
-                if keyword.lower() == task_lower:
+                if keyword_lower == task_lower:
                     keyword_hits += 2
 
         if keyword_hits > 0:

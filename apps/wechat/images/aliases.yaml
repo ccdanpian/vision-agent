@@ -68,8 +68,21 @@ aliases:
   标签: wechat_contacts_tag
   公众号: wechat_contacts_official
 
+  # 腾讯新闻弹窗
+  腾讯新闻: wechat_news_button
+  新闻弹窗: wechat_news_button
+  新闻关闭: wechat_news_button
+
   # 朋友圈
   朋友圈: wechat_moments
+  朋友圈入口: wechat_moments_entry
+  进入朋友圈: wechat_moments_entry
   发朋友圈: wechat_moments_camera
   朋友圈相机: wechat_moments_camera
+  朋友圈输入框: wechat_moments_input_box
+  朋友圈文字输入框: wechat_moments_input_box
   发表: wechat_moments_publish
+  添加图片: wechat_moments_pic_add_start
+  选择图片: wechat_moments_pic_add_start
+  图片添加完成: wechat_moments_pic_add_done
+  完成选图: wechat_moments_pic_add_done
