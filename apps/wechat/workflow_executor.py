@@ -599,92 +599,112 @@ class WorkflowExecutor:
         # 合并默认参数
         full_params = {**workflow.optional_params, **params}
 
-        # 0. 确保微信已打开并在前台
-        if not self._ensure_wechat_running():
-            return {
-                "success": False,
-                "message": "无法启动微信",
-                "data": None
-            }
-
-        # 1. 检测当前界面
-        current_screen = self.detect_screen()
-        self._log(f"  当前界面: {current_screen.value}")
-        self._log(f"  有效起点: {[s.value for s in workflow.valid_start_screens]}")
-
-        # 2. 确保在有效起始界面
-        # 策略：如果不确定在正确位置，就先导航到首页
-        need_navigate = False
-
-        if current_screen == WeChatScreen.UNKNOWN:
-            # 未识别的界面，必须先回首页
-            self._log(f"  未识别界面，需要先回首页")
-            need_navigate = True
-        elif current_screen not in workflow.valid_start_screens:
-            # 不在有效起始界面
-            self._log(f"  不在有效起始界面，需要先回首页")
-            need_navigate = True
-        elif current_screen != WeChatScreen.HOME and WeChatScreen.HOME in workflow.valid_start_screens:
-            # 虽然在有效起点（如 CHAT），但首页也是有效起点，优先回首页
-            # 因为从首页开始更可靠
-            self._log(f"  当前在 {current_screen.value}，但优先从首页开始")
-            need_navigate = True
-
-        if need_navigate:
-            self._log(f"  === 导航到首页（带 AI 回退）===")
-            nav_result = self.navigate_to_home_with_ai_fallback()
-
-            if not nav_result["success"]:
-                self._log(f"  ✗ 导航失败: {nav_result['message']}")
+        # 使用 try-finally 确保任务完成后执行复位
+        try:
+            # 0. 确保微信已打开并在前台
+            if not self._ensure_wechat_running():
                 return {
                     "success": False,
-                    "message": nav_result["message"],
+                    "message": "无法启动微信",
                     "data": None
                 }
 
-            self._log(f"  ✓ 已确认在首页 (方法: {nav_result['method']})")
+            # 1. 检测当前界面
+            current_screen = self.detect_screen()
+            self._log(f"  当前界面: {current_screen.value}")
+            self._log(f"  有效起点: {[s.value for s in workflow.valid_start_screens]}")
 
-        # 3. 执行工作流步骤
-        for i, step in enumerate(workflow.steps):
-            step_desc = self._render_template(step.description, full_params)
-            self._log(f"  步骤 {i + 1}: {step_desc}")
+            # 2. 确保在有效起始界面
+            # 策略：如果不确定在正确位置，就先导航到首页
+            need_navigate = False
 
-            result = self._execute_step(step, full_params)
-            if not result["success"]:
-                self._log(f"  ✗ 步骤失败: {result['message']}")
+            if current_screen == WeChatScreen.UNKNOWN:
+                # 未识别的界面，必须先回首页
+                self._log(f"  未识别界面，需要先回首页")
+                need_navigate = True
+            elif current_screen not in workflow.valid_start_screens:
+                # 不在有效起始界面
+                self._log(f"  不在有效起始界面，需要先回首页")
+                need_navigate = True
+            elif current_screen != WeChatScreen.HOME and WeChatScreen.HOME in workflow.valid_start_screens:
+                # 虽然在有效起点（如 CHAT），但首页也是有效起点，优先回首页
+                # 因为从首页开始更可靠
+                self._log(f"  当前在 {current_screen.value}，但优先从首页开始")
+                need_navigate = True
 
-                # 尝试恢复
-                if self._try_recover(step, full_params):
-                    # 重试当前步骤
-                    result = self._execute_step(step, full_params)
-                    if not result["success"]:
-                        return {
-                            "success": False,
-                            "message": f"步骤 {i + 1} 失败: {result['message']}",
-                            "data": None
-                        }
-                else:
+            if need_navigate:
+                self._log(f"  === 导航到首页（带 AI 回退）===")
+                nav_result = self.navigate_to_home_with_ai_fallback()
+
+                if not nav_result["success"]:
+                    self._log(f"  ✗ 导航失败: {nav_result['message']}")
                     return {
                         "success": False,
-                        "message": f"步骤 {i + 1} 失败且无法恢复: {result['message']}",
+                        "message": nav_result["message"],
                         "data": None
                     }
 
-            self._log(f"  ✓ 步骤 {i + 1} 完成")
+                self._log(f"  ✓ 已确认在首页 (方法: {nav_result['method']})")
 
-            # 检查是否到达期望界面
-            if step.expect_screen:
-                time.sleep(0.3)  # 等待界面切换
-                actual_screen = self.detect_screen()
-                if actual_screen != step.expect_screen:
-                    self._log(f"  ! 界面不符: 期望 {step.expect_screen.value}, 实际 {actual_screen.value}")
+            # 3. 执行工作流步骤
+            for i, step in enumerate(workflow.steps):
+                step_desc = self._render_template(step.description, full_params)
+                self._log(f"  步骤 {i + 1}: {step_desc}")
 
-        self._log(f"=== 工作流完成 ===")
-        return {
-            "success": True,
-            "message": "工作流执行成功",
-            "data": None
-        }
+                result = self._execute_step(step, full_params)
+                if not result["success"]:
+                    self._log(f"  ✗ 步骤失败: {result['message']}")
+
+                    # 尝试恢复
+                    if self._try_recover(step, full_params):
+                        # 重试当前步骤
+                        result = self._execute_step(step, full_params)
+                        if not result["success"]:
+                            return {
+                                "success": False,
+                                "message": f"步骤 {i + 1} 失败: {result['message']}",
+                                "data": None
+                            }
+                    else:
+                        return {
+                            "success": False,
+                            "message": f"步骤 {i + 1} 失败且无法恢复: {result['message']}",
+                            "data": None
+                        }
+
+                self._log(f"  ✓ 步骤 {i + 1} 完成")
+
+                # 检查是否到达期望界面
+                if step.expect_screen:
+                    time.sleep(0.3)  # 等待界面切换
+                    actual_screen = self.detect_screen()
+                    if actual_screen != step.expect_screen:
+                        self._log(f"  ! 界面不符: 期望 {step.expect_screen.value}, 实际 {actual_screen.value}")
+
+            self._log(f"=== 工作流完成 ===")
+            return {
+                "success": True,
+                "message": "工作流执行成功",
+                "data": None
+            }
+
+        finally:
+            # 任务完成后执行复位（无论成功还是失败）
+            self._log("")
+            self._log("╔════════════════════════════════════════╗")
+            self._log("║       【复位流程】任务完成后复位        ║")
+            self._log("╚════════════════════════════════════════╝")
+            self._log("")
+
+            try:
+                reset_success = self._ensure_at_home_screen()
+                if reset_success:
+                    self._log("✓ 复位成功，已返回首页")
+                else:
+                    self._log("⚠️  复位失败，但不影响任务结果")
+            except Exception as e:
+                self._log(f"⚠️  复位过程出现异常: {e}")
+                self._log("  （不影响任务结果）")
 
     def _execute_step(
         self,

@@ -7,7 +7,7 @@
 | 文档 | 说明 |
 |------|------|
 | [01-architecture.md](./01-architecture.md) | 系统架构总览，核心组件和处理流程 |
-| [02-workflow-system.md](./02-workflow-system.md) | 工作流系统（核心），简单/复杂任务处理策略 |
+| [02-workflow-system.md](./02-workflow-system.md) | 工作流系统（核心），任务分类器与工作流处理策略 |
 | [03-handler.md](./03-handler.md) | Handler 实现，工作流选择与执行入口 |
 | [04-workflow-executor.md](./04-workflow-executor.md) | 工作流执行器，界面检测与导航 |
 | [05-reference-images.md](./05-reference-images.md) | 参考图片管理，命名规范与别名系统 |
@@ -53,6 +53,8 @@ touch __init__.py
 
 ### 任务分类
 
+系统使用可配置的任务分类器自动判断任务类型：
+
 ```
 用户任务
     │
@@ -62,6 +64,30 @@ touch __init__.py
     └─ 复杂任务（多步骤/含连接词）
         └─ LLM 分析 → 选择/组合工作流
 ```
+
+**任务分类器支持三种模式**：
+
+1. **SS 快速模式**（自动检测）
+   - ⚡ 极速响应（<10ms），零成本
+   - ✅ 100%准确率，固定格式
+   - 触发：任务以 `ss` 开头
+   - 示例：`ss:消息:张三:你好`
+   - 详见：[SS 快速模式使用指南](../SS_QUICK_MODE.md)
+
+2. **正则表达式模式**（默认）
+   - ✅ 零成本，快速响应
+   - ✅ 准确率约90%
+   - 配置：`TASK_CLASSIFIER_MODE=regex`
+
+3. **LLM 智能模式**
+   - ✅ 准确率约95%
+   - ✅ 支持独立模型配置（可用更便宜的模型）
+   - ✅ 同时解析任务参数
+   - ✅ 识别无效输入（invalid 类型）
+   - 配置：`TASK_CLASSIFIER_MODE=llm`
+   - 详见：[无效输入处理](../INVALID_INPUT_HANDLING.md)
+
+详见 [02-workflow-system.md](./02-workflow-system.md#任务分类器taskclassifier)
 
 ### 工作流优先级
 

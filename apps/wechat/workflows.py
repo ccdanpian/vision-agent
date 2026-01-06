@@ -11,6 +11,10 @@ apps/wechat/workflows.py
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Callable, Any
 from enum import Enum
+import re
+
+# 导入任务分类器
+from ai.task_classifier import get_task_classifier
 
 
 class WeChatScreen(Enum):
@@ -479,6 +483,7 @@ SIMPLE_TASK_PATTERNS = [
 
 
 # 复合任务关键词（检测到这些词表示是复杂任务，需要 LLM 判断）
+# 保留用于向后兼容和正则模式
 COMPLEX_TASK_INDICATORS = [
     "然后", "再", "接着", "之后", "完成后",
     "并且", "同时", "顺便",
@@ -487,18 +492,13 @@ COMPLEX_TASK_INDICATORS = [
 
 
 def is_complex_task(task: str) -> bool:
-    """判断是否为复杂任务"""
-    # 包含复合任务指示词
-    if any(indicator in task for indicator in COMPLEX_TASK_INDICATORS):
-        return True
+    """
+    判断是否为复杂任务
 
-    # 包含多个动作词
-    action_words = ["发消息", "发朋友圈", "搜索", "加好友", "打开", "点击", "截图"]
-    action_count = sum(1 for w in action_words if w in task)
-    if action_count >= 2:
-        return True
-
-    return False
+    使用任务分类器判断（支持正则和LLM两种模式，通过环境变量配置）
+    """
+    classifier = get_task_classifier()
+    return classifier.is_complex_task(task)
 
 
 def match_simple_workflow(task: str) -> Optional[Dict[str, Any]]:

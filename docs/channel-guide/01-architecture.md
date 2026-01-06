@@ -46,6 +46,7 @@
 | 组件 | 文件 | 职责 |
 |------|------|------|
 | `ModuleRegistry` | `apps/__init__.py` | 模块发现、注册、任务路由 |
+| `TaskClassifier` | `ai/task_classifier.py` | 任务分类（简单/复杂），支持正则/LLM模式 |
 | `Handler` | `apps/{channel}/handler.py` | 频道入口，工作流选择与执行 |
 | `Workflows` | `apps/{channel}/workflows.py` | 预设工作流定义、任务匹配规则 |
 | `WorkflowExecutor` | `apps/{channel}/workflow_executor.py` | 工作流执行、界面检测、导航 |

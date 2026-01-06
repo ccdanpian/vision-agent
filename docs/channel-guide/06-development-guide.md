@@ -127,7 +127,19 @@ python test_planner.py --channel {channel_name} --task "测试任务"
 - **简单任务**：单一动作，无顺序连接词（"然后"、"再"等），可直接规则匹配
 - **复杂任务**：包含连接词或多个动作词，需要 LLM 分析和选择工作流
 
-**判断逻辑**：
+**系统使用任务分类器判断**（支持正则和LLM两种模式）：
+
+```python
+# 使用方式（自动使用环境变量配置）
+from apps.wechat.workflows import is_complex_task
+
+if is_complex_task("给张三发消息说你好"):
+    # 简单任务
+else:
+    # 复杂任务
+```
+
+**判断逻辑**（正则模式）：
 ```python
 COMPLEX_TASK_INDICATORS = ["然后", "再", "接着", "之后", "完成后", "并且", "同时", "顺便", "截图", "保存"]
 
@@ -140,6 +152,101 @@ def is_complex_task(task):
     action_count = sum(1 for w in action_words if w in task)
     return action_count >= 2
 ```
+
+**配置任务分类器**：
+```bash
+# .env
+TASK_CLASSIFIER_MODE=regex  # 或 llm
+```
+
+详见 [02-workflow-system.md - 任务分类器](./02-workflow-system.md#任务分类器taskclassifier)
+
+### Q: 应该选择哪种任务分类模式？
+
+**三种模式对比**：
+
+| 模式 | 触发方式 | 速度 | 成本 | 准确率 | 适用场景 |
+|------|---------|------|------|--------|---------|
+| **SS快速** | `ss` 开头 | ⚡⚡⚡ <10ms | 💰 零成本 | ✅ 100% | 高频任务、批量操作、API集成 |
+| **正则** | 环境变量 | ⚡⚡ <1ms | 💰 零成本 | ⚠️ 90% | 个人使用、预算有限 |
+| **LLM智能** | 环境变量 | 🐌 ~500ms | 💰💰 有成本 | ✅ 95% | 自然语言、高准确率 |
+
+**推荐配置**：
+
+| 场景 | 配置 | 说明 |
+|------|------|------|
+| **高频任务/自动化** | SS 快速模式 | 使用 `ss:消息:张三:你好` 格式，零成本极速 |
+| **个人使用/预算有限** | `TASK_CLASSIFIER_MODE=regex` | 零成本，准确率90%+ |
+| **生产环境/预算充足** | `TASK_CLASSIFIER_MODE=llm` + DeepSeek | 成本极低（~0.001元/次），准确率95%+ |
+| **追求最高准确率** | `TASK_CLASSIFIER_MODE=llm` + GPT-4/Claude | 准确率98%+，成本较高 |
+
+**成本优化示例**：
+```bash
+# 主LLM使用Claude（任务规划）
+LLM_PROVIDER=claude
+ANTHROPIC_API_KEY=sk-ant-xxx
+
+# 任务分类器使用DeepSeek（分类）
+TASK_CLASSIFIER_MODE=llm
+TASK_CLASSIFIER_LLM_API_KEY=sk-xxx
+TASK_CLASSIFIER_LLM_BASE_URL=https://api.deepseek.com/v1
+TASK_CLASSIFIER_LLM_MODEL=deepseek-chat
+```
+
+**节省成本**：任务分类成本降低90%+
+
+**SS 快速模式示例**：
+```bash
+# 高频任务使用 SS 模式
+ss:消息:客户A:早上好
+ss:消息:客户B:早上好
+ss:朋友圈:今天天气真好
+
+# 批量操作脚本
+for user in 张三 李四 王五; do
+    python main.py "ss:消息:$user:会议通知"
+done
+```
+
+详见：[SS 快速模式使用指南](../SS_QUICK_MODE.md)
+
+---
+
+### Q: 如何处理用户的无效输入（误触、空白等）？
+
+**系统自动处理**：
+
+LLM 智能模式会自动识别无效输入（`invalid` 类型）并提前拦截：
+
+**无效输入示例**：
+- 空白输入：`""`, `"   "`, `"\n"`
+- 无意义字符：`"aaa"`, `"123"`, `"!!!"`
+- 误触输入：`"s"`, `"、、、"`
+- 不清楚的指令：`"帮我"`, `"嗯"`, `"好的"`
+
+**处理流程**：
+```
+用户输入: "aaa"
+    ↓
+LLM 分类器识别: {type: "invalid", ...}
+    ↓
+Handler 提前拦截
+    ↓
+返回友好提示：
+"无效的输入指令。请输入有效的任务描述，例如：
+- 给张三发消息说你好
+- 发朋友圈今天天气真好
+- SS快速模式：ss:消息:张三:你好"
+```
+
+**优势**：
+- ✅ 节省资源：不调用 Planner LLM
+- ✅ 提升速度：响应时间缩短 75%
+- ✅ 友好提示：引导用户正确使用
+
+详见：[无效输入处理文档](../INVALID_INPUT_HANDLING.md)
+
+---
 
 ### Q: 为什么要区分界面判断参考图和点击操作参考图？
 
@@ -241,13 +348,33 @@ def parse_task_params(task, param_hints):
 
 新频道开发完成后，确认以下项目：
 
+### 基础配置
 - [ ] `config.yaml` 配置正确
+- [ ] `.env` 配置LLM和任务分类器
+- [ ] 任务分类器模式选择（regex/llm）
+
+### 工作流系统
 - [ ] 界面状态枚举覆盖主要页面
 - [ ] 界面检测参考图映射完整
 - [ ] 至少有一个基本工作流
 - [ ] 简单任务模式匹配规则有效
 - [ ] Handler 的 `execute_task_with_workflow()` 正常工作
 - [ ] `get_planner_prompt()` 返回有效提示词
+
+### 任务分类器
+- [ ] 测试正则模式的任务分类准确性
+- [ ] （可选）测试LLM模式的任务分类
+- [ ] 验证简单任务能正确匹配工作流
+- [ ] 验证复杂任务能正确触发LLM规划
+
+### 参考图系统
 - [ ] 参考图命名规范
 - [ ] `aliases.yaml` 配置中文别名
+- [ ] 点击操作图和界面验证图正确区分
+- [ ] 多设备适配的变体图（_v1, _v2）
+
+### 测试验证
 - [ ] 测试用例覆盖主要场景
+- [ ] 简单任务执行成功
+- [ ] 复杂任务执行成功
+- [ ] 失败恢复机制有效

@@ -16,6 +16,14 @@ _ENV_FILE = _PROJECT_ROOT / ".env"
 load_dotenv(_ENV_FILE, override=True)
 
 # ============================================================
+# 调试模式配置
+# ============================================================
+DEBUG_MODE = os.getenv("DEBUG_MODE", "false").lower() == "true"
+DEBUG_DEVICE_NAME = os.getenv("DEBUG_DEVICE_NAME", "模拟设备")
+DEBUG_SCREEN_WIDTH = int(os.getenv("DEBUG_SCREEN_WIDTH", "1080"))
+DEBUG_SCREEN_HEIGHT = int(os.getenv("DEBUG_SCREEN_HEIGHT", "2340"))
+
+# ============================================================
 # ADB 配置
 # ============================================================
 def _find_adb_path() -> str:
@@ -97,6 +105,19 @@ OCR_USE_GPU = os.getenv("OCR_USE_GPU", "false").lower() == "true"
 SCREENSHOT_INTERVAL = float(os.getenv("SCREENSHOT_INTERVAL", "1.0"))
 MAX_RETRY = int(os.getenv("MAX_RETRY", "5"))
 OPERATION_DELAY = float(os.getenv("OPERATION_DELAY", "0.5"))
+
+# ============================================================
+# 任务分类配置
+# ============================================================
+# 任务分类方式: regex（正则表达式） 或 llm（使用LLM判断）
+TASK_CLASSIFIER_MODE = os.getenv("TASK_CLASSIFIER_MODE", "regex")
+
+# 任务分类器 LLM 配置（仅当 TASK_CLASSIFIER_MODE=llm 时使用）
+# 如果不设置，则使用主 LLM 配置
+TASK_CLASSIFIER_LLM_PROVIDER = os.getenv("TASK_CLASSIFIER_LLM_PROVIDER", "")  # 留空使用主LLM
+TASK_CLASSIFIER_LLM_API_KEY = os.getenv("TASK_CLASSIFIER_LLM_API_KEY", "")
+TASK_CLASSIFIER_LLM_BASE_URL = os.getenv("TASK_CLASSIFIER_LLM_BASE_URL", "")
+TASK_CLASSIFIER_LLM_MODEL = os.getenv("TASK_CLASSIFIER_LLM_MODEL", "")
 
 # ============================================================
 # 应用截图等待时间配置（秒）

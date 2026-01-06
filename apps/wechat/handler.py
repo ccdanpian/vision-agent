@@ -14,6 +14,7 @@ from .workflows import (
     SCREEN_DETECT_REFS
 )
 from .workflow_executor import WorkflowExecutor, parse_task_params
+from ai.task_classifier import get_task_classifier, TaskType
 
 
 class Handler(DefaultHandler):
@@ -48,6 +49,9 @@ class Handler(DefaultHandler):
         super().set_logger(logger_func)
         if self._workflow_executor:
             self._workflow_executor.set_logger(logger_func)
+        # 设置任务分类器的日志
+        classifier = get_task_classifier()
+        classifier.set_logger(logger_func)
 
     def get_available_workflows(self) -> Dict[str, str]:
         """获取可用的工作流列表"""
@@ -170,8 +174,9 @@ class Handler(DefaultHandler):
         尝试使用工作流执行任务
 
         流程：
-        1. 简单任务 -> 规则匹配
-        2. 复杂任务 -> LLM 选择
+        1. 使用分类器分类并解析（支持 SS 快速模式和 LLM 智能模式）
+        2. 简单任务 -> 规则匹配工作流，使用解析的参数
+        3. 复杂任务 -> LLM 选择工作流
 
         Args:
             task: 用户任务描述
@@ -182,8 +187,37 @@ class Handler(DefaultHandler):
         workflow_name = None
         params = {}
 
-        # 1. 检查是否为复杂任务
-        if is_complex_task(task):
+        # 1. 使用分类器分类并解析（一次调用，同时获取分类和参数）
+        classifier = get_task_classifier()
+        task_type, parsed_data = classifier.classify_and_parse(task)
+
+        # 1.1 检查是否为无效输入
+        if parsed_data and parsed_data.get("type") == "invalid":
+            self._log(f"检测到无效输入: {task}")
+            return {
+                "success": False,
+                "message": "无效的输入指令。请输入有效的任务描述，例如：\n"
+                          "- 给张三发消息说你好\n"
+                          "- 发朋友圈今天天气真好\n"
+                          "- SS快速模式：ss:消息:张三:你好",
+                "error_type": "invalid_input"
+            }
+
+        # 2. 如果已经解析出 type，直接根据 type 选择工作流（SS 模式或 LLM 模式）
+        if parsed_data and parsed_data.get("type"):
+            task_parsed_type = parsed_data["type"]
+            workflow_name = self._map_type_to_workflow(task_parsed_type)
+
+            if workflow_name:
+                params = self._map_parsed_data_to_workflow_params(parsed_data, workflow_name)
+                self._log(f"根据 type 选择工作流: {workflow_name} (type={task_parsed_type})")
+                self._log(f"使用解析的参数: {params}")
+            else:
+                self._log(f"未知的任务类型: {task_parsed_type}")
+                return None
+
+        elif task_type == TaskType.COMPLEX:
+            # 复杂任务 -> LLM 选择工作流
             self._log(f"检测到复杂任务，使用 LLM 选择工作流")
             llm_result = self.select_workflow_with_llm(task)
             if llm_result:
@@ -191,14 +225,17 @@ class Handler(DefaultHandler):
                 params = llm_result["params"]
                 self._log(f"LLM 选择工作流: {workflow_name}, 参数: {params}")
         else:
-            # 2. 简单任务使用规则匹配
+            # 3. 简单任务但没有 type -> 规则匹配工作流（兼容旧逻辑）
             match_result = self.match_workflow(task)
             if match_result:
                 workflow = match_result["workflow"]
                 workflow_name = workflow.name
                 param_hints = match_result["param_hints"]
+
+                # 回退：正则表达式解析（兼容旧逻辑）
                 params = parse_task_params(task, param_hints)
-                self._log(f"规则匹配工作流: {workflow_name}, 参数: {params}")
+                self._log(f"规则匹配工作流: {workflow_name}")
+                self._log(f"使用正则解析的参数: {params}")
 
         # 3. 如果没有匹配到工作流
         if not workflow_name:
@@ -207,7 +244,7 @@ class Handler(DefaultHandler):
 
         # 4. 检查必需参数
         workflow = WORKFLOWS[workflow_name]
-        missing = [p for p in workflow.required_params if p not in params]
+        missing = [p for p in workflow.required_params if p not in params or not params[p]]
         if missing:
             self._log(f"缺少必需参数: {missing}")
             return {
@@ -220,6 +257,82 @@ class Handler(DefaultHandler):
 
         # 5. 执行工作流
         return self.execute_workflow(workflow_name, params)
+
+    def _map_type_to_workflow(self, task_type: str) -> Optional[str]:
+        """
+        将任务类型映射到工作流名称
+
+        Args:
+            task_type: 任务类型（如 send_msg, post_moment_only_text）
+
+        Returns:
+            工作流名称，如果无法映射则返回 None
+        """
+        type_to_workflow_map = {
+            "send_msg": "send_message",
+            "post_moment_only_text": "post_moments",
+            "search_contact": "search_contact",
+            "add_friend": "add_friend",
+        }
+
+        return type_to_workflow_map.get(task_type)
+
+    def _map_parsed_data_to_workflow_params(
+        self,
+        parsed_data: Dict[str, Any],
+        workflow_name: str
+    ) -> Dict[str, Any]:
+        """
+        将解析的数据映射到工作流参数
+
+        支持 SS 快速模式和 LLM 智能模式解析的统一格式：
+        {
+          "type": "send_msg" / "post_moment_only_text" / "others",
+          "recipient": "好友名称",
+          "content": "消息内容"
+        }
+
+        Args:
+            parsed_data: 解析的数据
+            workflow_name: 工作流名称
+
+        Returns:
+            工作流所需的参数字典
+        """
+        params = {}
+        task_type = parsed_data.get("type", "")
+        recipient = parsed_data.get("recipient", "")
+        content = parsed_data.get("content", "")
+
+        # 根据工作流名称映射参数
+        if workflow_name == "send_message":
+            # 发消息工作流需要: contact, message
+            params["contact"] = recipient
+            params["message"] = content
+
+        elif workflow_name == "post_moments":
+            # 发朋友圈工作流需要: content
+            params["content"] = content
+
+        elif workflow_name == "search_contact":
+            # 搜索联系人需要: keyword
+            params["keyword"] = recipient or content
+
+        elif workflow_name == "add_friend":
+            # 添加好友需要: wechat_id
+            params["wechat_id"] = recipient or content
+
+        else:
+            # 未知工作流，尝试通用映射
+            self._log(f"警告: 未知工作流 {workflow_name}，使用通用参数映射")
+            if recipient:
+                params["contact"] = recipient
+                params["recipient"] = recipient
+            if content:
+                params["message"] = content
+                params["content"] = content
+
+        return params
 
     def detect_current_screen(self) -> WeChatScreen:
         """检测当前微信界面"""
