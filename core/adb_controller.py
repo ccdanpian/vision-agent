@@ -477,25 +477,29 @@ class ADBController:
 
         return False
 
-    def clear_text_field(self) -> bool:
+    def clear_text_field(self, max_chars: int = 50) -> bool:
         """
         清空当前输入框
 
-        通过全选+删除清空文本
+        通过移到文本末尾然后批量删除来清空
+
+        Args:
+            max_chars: 最多删除的字符数（默认50）
+
+        Returns:
+            是否执行成功
         """
-        # 方法1: Ctrl+A 全选，然后删除
-        self._run_adb("shell", "input", "keyevent", "--longpress", "29", "29")  # CTRL
-        time.sleep(0.05)
-        self._run_adb("shell", "input", "keyevent", "29+31")  # CTRL+A (全选)
-        time.sleep(0.1)
-        self.input_keyevent(67)  # KEYCODE_DEL
         time.sleep(0.1)
 
-        # 方法2: 备用 - 移到末尾然后删除多次
-        self._run_adb("shell", "input", "keyevent", "123")  # KEYCODE_MOVE_END
-        time.sleep(0.05)
-        # 快速删除 20 个字符
-        for _ in range(20):
-            self._run_adb("shell", "input", "keyevent", "67")
+        # Ctrl+End 移到整个文本末尾（不只是当前行）
+        # keycombination: CTRL_LEFT(113) + MOVE_END(123)
+        cmd = f'"{self.adb_path}" -s {self.device_address} shell "input keycombination 113 123"'
+        subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
+        time.sleep(0.1)
 
+        # 批量删除
+        del_keys = ["67"] * max_chars
+        self._run_adb("shell", "input", "keyevent", *del_keys)
+
+        time.sleep(0.1)
         return True

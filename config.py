@@ -107,6 +107,22 @@ MAX_RETRY = int(os.getenv("MAX_RETRY", "5"))
 OPERATION_DELAY = float(os.getenv("OPERATION_DELAY", "0.5"))
 
 # ============================================================
+# 工作流执行配置
+# ============================================================
+WORKFLOW_MAX_STEP_RETRIES = 3        # 步骤最大重试次数
+WORKFLOW_MAX_BACK_PRESSES = 5        # 返回键最多按压次数
+WORKFLOW_BACK_PRESS_INTERVAL = 500   # 返回键按压间隔 (ms)
+WORKFLOW_HOME_MAX_ATTEMPTS = 5       # 确保在首页/导航到首页的最大尝试次数
+WORKFLOW_AI_FALLBACK_ATTEMPTS = 3    # AI回退最大尝试次数
+WORKFLOW_RECOVER_NAV_ATTEMPTS = 3    # 恢复时导航到首页的尝试次数
+WORKFLOW_RESET_AFTER_TASK = os.getenv("WORKFLOW_RESET_AFTER_TASK", "false").lower() == "true"  # 任务完成后是否复位到首页
+
+# ============================================================
+# AI 定位配置
+# ============================================================
+AI_LOCATE_CONFIDENCE_THRESHOLD = 0.6  # AI 定位最低置信度阈值（低于此值视为未找到）
+
+# ============================================================
 # 任务分类配置
 # ============================================================
 # 任务分类方式: regex（正则表达式） 或 llm（使用LLM判断）

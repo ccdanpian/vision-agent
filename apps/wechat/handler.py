@@ -142,7 +142,8 @@ class Handler(DefaultHandler):
     def execute_workflow(
         self,
         workflow_name: str,
-        params: Dict[str, Any]
+        params: Dict[str, Any],
+        local_only: bool = False
     ) -> Dict[str, Any]:
         """
         执行指定工作流
@@ -150,6 +151,7 @@ class Handler(DefaultHandler):
         Args:
             workflow_name: 工作流名称
             params: 工作流参数
+            local_only: 是否仅使用本地匹配（禁用AI回退）
 
         Returns:
             执行结果
@@ -167,7 +169,7 @@ class Handler(DefaultHandler):
             }
 
         workflow = WORKFLOWS[workflow_name]
-        return self._workflow_executor.execute_workflow(workflow, params)
+        return self._workflow_executor.execute_workflow(workflow, params, local_only)
 
     def execute_task_with_workflow(self, task: str) -> Optional[Dict[str, Any]]:
         """
@@ -175,7 +177,7 @@ class Handler(DefaultHandler):
 
         流程：
         1. 使用分类器分类并解析（支持 SS 快速模式和 LLM 智能模式）
-        2. 简单任务 -> 规则匹配工作流，使用解析的参数
+        2. 简单任务 -> 优先尝试 local_only 模式，失败后回退正常模式
         3. 复杂任务 -> LLM 选择工作流
 
         Args:
@@ -186,6 +188,7 @@ class Handler(DefaultHandler):
         """
         workflow_name = None
         params = {}
+        task_parsed_type = None
 
         # 1. 使用分类器分类并解析（一次调用，同时获取分类和参数）
         classifier = get_task_classifier()
@@ -255,25 +258,66 @@ class Handler(DefaultHandler):
                 "missing_params": missing
             }
 
-        # 5. 执行工作流
-        return self.execute_workflow(workflow_name, params)
+        # 5. 判断是否可以尝试 local_only 模式
+        # 只有简单任务（send_msg, post_moment_only_text）有 local 版本
+        local_workflow_types = {"send_msg", "post_moment_only_text"}
+        can_try_local = task_parsed_type in local_workflow_types
 
-    def _map_type_to_workflow(self, task_type: str) -> Optional[str]:
+        if can_try_local:
+            self._log(f"")
+            self._log(f"╔════════════════════════════════════════╗")
+            self._log(f"║    【优化模式】尝试纯本地匹配执行       ║")
+            self._log(f"╚════════════════════════════════════════╝")
+            self._log(f"")
+
+            # 获取 local 版本工作流
+            local_workflow_name = self._map_type_to_workflow(task_parsed_type, local_only=True)
+            if local_workflow_name:
+                self._log(f"执行 local 工作流: {local_workflow_name}")
+
+                # 执行 local_only 版本（使用 OPENCV_ONLY 策略）
+                result = self.execute_workflow(local_workflow_name, params, local_only=True)
+
+                if result["success"]:
+                    self._log(f"✓ local_only 模式执行成功")
+                    return result
+
+                # local_only 失败，回退到正常模式
+                self._log(f"")
+                self._log(f"╔════════════════════════════════════════╗")
+                self._log(f"║    【回退模式】local失败，使用正常流程   ║")
+                self._log(f"╚════════════════════════════════════════╝")
+                self._log(f"")
+                self._log(f"local 失败原因: {result.get('message', '未知')}")
+
+        # 6. 正常模式执行（local_only=False）
+        return self.execute_workflow(workflow_name, params, local_only=False)
+
+    def _map_type_to_workflow(self, task_type: str, local_only: bool = False) -> Optional[str]:
         """
         将任务类型映射到工作流名称
 
         Args:
             task_type: 任务类型（如 send_msg, post_moment_only_text）
+            local_only: 是否使用 local_only 版本的工作流
 
         Returns:
             工作流名称，如果无法映射则返回 None
         """
-        type_to_workflow_map = {
-            "send_msg": "send_message",
-            "post_moment_only_text": "post_moments",
-            "search_contact": "search_contact",
-            "add_friend": "add_friend",
-        }
+        if local_only:
+            # Local 版本映射
+            type_to_workflow_map = {
+                "send_msg": "send_message_local",
+                "post_moment_only_text": "post_moments_only_text_local",
+            }
+        else:
+            # 正常版本映射
+            type_to_workflow_map = {
+                "send_msg": "send_message",
+                "post_moment_only_text": "post_moments",
+                "search_contact": "search_contact",
+                "add_friend": "add_friend",
+            }
 
         return type_to_workflow_map.get(task_type)
 

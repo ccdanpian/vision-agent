@@ -38,8 +38,10 @@ class WorkflowExecutor:
         self.runner = task_runner
         self.handler = handler
         self._logger = None
-        self._max_back_presses = 5  # 最多按返回键次数
-        self._back_press_interval = 500  # 返回键间隔 ms
+        self._max_back_presses = config.WORKFLOW_MAX_BACK_PRESSES
+        self._back_press_interval = config.WORKFLOW_BACK_PRESS_INTERVAL
+        self._max_step_retries = config.WORKFLOW_MAX_STEP_RETRIES
+        self._local_only = False  # 当前是否处于 local_only 模式
 
     def set_logger(self, logger_func):
         """设置日志函数"""
@@ -106,7 +108,7 @@ class WorkflowExecutor:
         # === 确保回到首页（消息Tab页面）===
         return self._ensure_at_home_screen()
 
-    def _ensure_at_home_screen(self, max_attempts: int = 5) -> bool:
+    def _ensure_at_home_screen(self, max_attempts: int = None) -> bool:
         """
         确保微信处于首页（消息页面）
 
@@ -122,6 +124,9 @@ class WorkflowExecutor:
         Returns:
             是否成功回到首页
         """
+        if max_attempts is None:
+            max_attempts = config.WORKFLOW_HOME_MAX_ATTEMPTS
+
         self._log("")
         self._log("[预置] 步骤1: 确保微信在消息页面")
 
@@ -372,7 +377,7 @@ class WorkflowExecutor:
 
         return False
 
-    def navigate_to_home(self, max_attempts: int = 5) -> bool:
+    def navigate_to_home(self, max_attempts: int = None) -> bool:
         """
         导航回首页
 
@@ -388,6 +393,9 @@ class WorkflowExecutor:
         Returns:
             是否成功到达首页
         """
+        if max_attempts is None:
+            max_attempts = config.WORKFLOW_HOME_MAX_ATTEMPTS
+
         self._log("=== 导航到首页 ===")
 
         for attempt in range(max_attempts):
@@ -420,7 +428,7 @@ class WorkflowExecutor:
         self._log(f"  ✗ 预定义方法未能到达首页，当前: {current_screen.value}")
         return False
 
-    def navigate_to_home_with_ai_fallback(self, max_attempts: int = 5) -> Dict[str, Any]:
+    def navigate_to_home_with_ai_fallback(self, max_attempts: int = None) -> Dict[str, Any]:
         """
         导航回首页，带 AI 回退
 
@@ -434,6 +442,9 @@ class WorkflowExecutor:
         Returns:
             {"success": bool, "method": str, "message": str}
         """
+        if max_attempts is None:
+            max_attempts = config.WORKFLOW_HOME_MAX_ATTEMPTS
+
         # 1. 先尝试预定义方法
         if self.navigate_to_home(max_attempts):
             return {
@@ -445,7 +456,7 @@ class WorkflowExecutor:
         self._log("  预定义方法失败，尝试 AI 辅助导航...")
 
         # 2. 使用 AI 分析并尝试导航
-        for ai_attempt in range(3):
+        for ai_attempt in range(config.WORKFLOW_AI_FALLBACK_ATTEMPTS):
             screenshot = self.runner._capture_screenshot()
 
             # 让 AI 分析当前界面并给出导航建议
@@ -571,7 +582,8 @@ class WorkflowExecutor:
     def execute_workflow(
         self,
         workflow: Workflow,
-        params: Dict[str, Any]
+        params: Dict[str, Any],
+        local_only: bool = False
     ) -> Dict[str, Any]:
         """
         执行工作流
@@ -579,13 +591,18 @@ class WorkflowExecutor:
         Args:
             workflow: 工作流定义
             params: 工作流参数
+            local_only: 是否仅使用本地匹配（禁用AI回退）
 
         Returns:
             执行结果 {"success": bool, "message": str, "data": Any}
         """
+        # 设置 local_only 模式
+        self._local_only = local_only
         self._log(f"=== 执行工作流: {workflow.name} ===")
         self._log(f"  描述: {workflow.description}")
         self._log(f"  参数: {params}")
+        if local_only:
+            self._log(f"  模式: local_only（纯本地匹配，无AI回退）")
 
         # 检查必需参数
         missing_params = [p for p in workflow.required_params if p not in params]
@@ -600,86 +617,147 @@ class WorkflowExecutor:
         full_params = {**workflow.optional_params, **params}
 
         # 使用 try-finally 确保任务完成后执行复位
+        # 记录可跳过的步骤索引
+        skip_to_step = 0
+
         try:
-            # 0. 确保微信已打开并在前台
-            if not self._ensure_wechat_running():
-                return {
-                    "success": False,
-                    "message": "无法启动微信",
-                    "data": None
-                }
+            # ===============================================
+            # 【智能优化】在预置流程之前先检测是否可以跳过导航
+            # ===============================================
+            if self._local_only:
+                self._log("")
+                self._log("╔════════════════════════════════════════╗")
+                self._log("║    【智能检测】检测是否可跳过导航步骤    ║")
+                self._log("╚════════════════════════════════════════╝")
+                self._log("")
 
-            # 1. 检测当前界面
-            current_screen = self.detect_screen()
-            self._log(f"  当前界面: {current_screen.value}")
-            self._log(f"  有效起点: {[s.value for s in workflow.valid_start_screens]}")
+                skip_to_step = self._check_smart_skip(workflow, full_params)
 
-            # 2. 确保在有效起始界面
-            # 策略：如果不确定在正确位置，就先导航到首页
-            need_navigate = False
+                if skip_to_step > 0:
+                    self._log(f"  ★ 智能跳过: 已在目标界面，跳过前 {skip_to_step} 步")
+                    self._log(f"  跳过完整预置流程，仅确保微信在前台...")
 
-            if current_screen == WeChatScreen.UNKNOWN:
-                # 未识别的界面，必须先回首页
-                self._log(f"  未识别界面，需要先回首页")
-                need_navigate = True
-            elif current_screen not in workflow.valid_start_screens:
-                # 不在有效起始界面
-                self._log(f"  不在有效起始界面，需要先回首页")
-                need_navigate = True
-            elif current_screen != WeChatScreen.HOME and WeChatScreen.HOME in workflow.valid_start_screens:
-                # 虽然在有效起点（如 CHAT），但首页也是有效起点，优先回首页
-                # 因为从首页开始更可靠
-                self._log(f"  当前在 {current_screen.value}，但优先从首页开始")
-                need_navigate = True
+                    # 只确保微信在前台，不导航到首页
+                    WECHAT_PACKAGE = "com.tencent.mm"
+                    current_app = self.runner.adb.get_current_app()
+                    if current_app != WECHAT_PACKAGE:
+                        self._log(f"  微信不在前台，启动微信...")
+                        self.runner.adb.start_app(WECHAT_PACKAGE)
+                        time.sleep(config.OPERATION_DELAY * 4)
 
-            if need_navigate:
-                self._log(f"  === 导航到首页（带 AI 回退）===")
-                nav_result = self.navigate_to_home_with_ai_fallback()
+                    self._log("")
+                    self._log("╔════════════════════════════════════════╗")
+                    self._log("║     【预置流程跳过】直接执行正式任务    ║")
+                    self._log("╚════════════════════════════════════════╝")
+                    self._log("")
+                else:
+                    self._log(f"  未检测到可跳过情况，执行完整预置流程")
+                    # 执行完整预置流程
+                    preset_success = self._ensure_wechat_running()
+                    if not preset_success:
+                        self._log("  ⚠ 预置流程失败，但仍尝试继续执行正式任务...")
+            else:
+                # 非 local_only 模式：执行完整预置流程
+                preset_success = self._ensure_wechat_running()
+                if not preset_success:
+                    self._log("  ⚠ 预置流程失败，但仍尝试继续执行正式任务...")
 
-                if not nav_result["success"]:
-                    self._log(f"  ✗ 导航失败: {nav_result['message']}")
-                    return {
-                        "success": False,
-                        "message": nav_result["message"],
-                        "data": None
-                    }
+            # 如果已经智能跳过，不需要再检测界面和导航
+            if skip_to_step == 0:
+                # 检测当前界面
+                current_screen = self.detect_screen()
+                self._log(f"  当前界面: {current_screen.value}")
+                self._log(f"  有效起点: {[s.value for s in workflow.valid_start_screens]}")
 
-                self._log(f"  ✓ 已确认在首页 (方法: {nav_result['method']})")
+                # 确保在有效起始界面
+                # 策略：如果不确定在正确位置，就先导航到首页
+                need_navigate = False
+
+                if current_screen == WeChatScreen.UNKNOWN:
+                    # 未识别的界面，必须先回首页
+                    self._log(f"  未识别界面，需要先回首页")
+                    need_navigate = True
+                elif current_screen not in workflow.valid_start_screens:
+                    # 不在有效起始界面
+                    self._log(f"  不在有效起始界面，需要先回首页")
+                    need_navigate = True
+                elif current_screen != WeChatScreen.HOME and WeChatScreen.HOME in workflow.valid_start_screens:
+                    # 虽然在有效起点（如 CHAT），但首页也是有效起点，优先回首页
+                    # 因为从首页开始更可靠
+                    self._log(f"  当前在 {current_screen.value}，但优先从首页开始")
+                    need_navigate = True
+
+                if need_navigate:
+                    self._log(f"  === 导航到首页（带 AI 回退）===")
+                    nav_result = self.navigate_to_home_with_ai_fallback()
+
+                    if not nav_result["success"]:
+                        self._log(f"  ✗ 导航失败: {nav_result['message']}")
+                        return {
+                            "success": False,
+                            "message": nav_result["message"],
+                            "data": None
+                        }
+
+                    self._log(f"  ✓ 已确认在首页 (方法: {nav_result['method']})")
 
             # 3. 执行工作流步骤
             for i, step in enumerate(workflow.steps):
+                # 智能跳过已完成的步骤
+                if i < skip_to_step:
+                    step_desc = self._render_template(step.description, full_params)
+                    self._log(f"  步骤 {i + 1}: {step_desc} [跳过]")
+                    continue
+
                 step_desc = self._render_template(step.description, full_params)
                 self._log(f"  步骤 {i + 1}: {step_desc}")
 
-                result = self._execute_step(step, full_params)
-                if not result["success"]:
-                    self._log(f"  ✗ 步骤失败: {result['message']}")
+                # 步骤执行与重试循环
+                step_success = False
+                last_error = ""
+                for retry in range(self._max_step_retries):
+                    if retry > 0:
+                        self._log(f"  重试第 {retry}/{self._max_step_retries - 1} 次...")
 
-                    # 尝试恢复
-                    if self._try_recover(step, full_params):
-                        # 重试当前步骤
-                        result = self._execute_step(step, full_params)
-                        if not result["success"]:
-                            return {
-                                "success": False,
-                                "message": f"步骤 {i + 1} 失败: {result['message']}",
-                                "data": None
-                            }
-                    else:
-                        return {
-                            "success": False,
-                            "message": f"步骤 {i + 1} 失败且无法恢复: {result['message']}",
-                            "data": None
-                        }
+                    result = self._execute_step(step, full_params)
+                    if result["success"]:
+                        step_success = True
+                        break
+
+                    last_error = result["message"]
+                    self._log(f"  ✗ 步骤失败: {last_error}")
+
+                    # 最后一次重试不需要恢复/等待
+                    if retry < self._max_step_retries - 1:
+                        if self._local_only:
+                            # local_only 模式：简单等待后重试（避免调用 AI 的恢复逻辑）
+                            wait_time = config.OPERATION_DELAY * 2  # 等待约 1 秒
+                            self._log(f"  [local_only] 等待 {wait_time}ms 后重试...")
+                            time.sleep(wait_time / 1000)
+                        else:
+                            # 正常模式：尝试恢复
+                            if not self._try_recover(step, full_params):
+                                self._log(f"  ✗ 恢复失败，继续重试...")
+
+                if not step_success:
+                    return {
+                        "success": False,
+                        "message": f"步骤 {i + 1} 失败（已重试{self._max_step_retries}次）: {last_error}",
+                        "data": None
+                    }
 
                 self._log(f"  ✓ 步骤 {i + 1} 完成")
 
                 # 检查是否到达期望界面
                 if step.expect_screen:
                     time.sleep(0.3)  # 等待界面切换
-                    actual_screen = self.detect_screen()
-                    if actual_screen != step.expect_screen:
-                        self._log(f"  ! 界面不符: 期望 {step.expect_screen.value}, 实际 {actual_screen.value}")
+                    # local_only 模式下跳过完整界面检测（避免AI调用）
+                    if self._local_only:
+                        self._log(f"  [local_only] 跳过界面验证 (期望: {step.expect_screen.value})")
+                    else:
+                        actual_screen = self.detect_screen()
+                        if actual_screen != step.expect_screen:
+                            self._log(f"  ! 界面不符: 期望 {step.expect_screen.value}, 实际 {actual_screen.value}")
 
             self._log(f"=== 工作流完成 ===")
             return {
@@ -689,22 +767,31 @@ class WorkflowExecutor:
             }
 
         finally:
-            # 任务完成后执行复位（无论成功还是失败）
-            self._log("")
-            self._log("╔════════════════════════════════════════╗")
-            self._log("║       【复位流程】任务完成后复位        ║")
-            self._log("╚════════════════════════════════════════╝")
-            self._log("")
+            # 重置 local_only 模式
+            self._local_only = False
 
-            try:
-                reset_success = self._ensure_at_home_screen()
-                if reset_success:
-                    self._log("✓ 复位成功，已返回首页")
-                else:
-                    self._log("⚠️  复位失败，但不影响任务结果")
-            except Exception as e:
-                self._log(f"⚠️  复位过程出现异常: {e}")
-                self._log("  （不影响任务结果）")
+            # 根据配置决定是否执行复位
+            if config.WORKFLOW_RESET_AFTER_TASK:
+                # 任务完成后执行复位（无论成功还是失败）
+                self._log("")
+                self._log("╔════════════════════════════════════════╗")
+                self._log("║       【复位流程】任务完成后复位        ║")
+                self._log("╚════════════════════════════════════════╝")
+                self._log("")
+
+                try:
+                    reset_success = self._ensure_at_home_screen()
+                    if reset_success:
+                        self._log("✓ 复位成功，已返回首页")
+                    else:
+                        self._log("⚠️  复位失败，但不影响任务结果")
+                except Exception as e:
+                    self._log(f"⚠️  复位过程出现异常: {e}")
+                    self._log("  （不影响任务结果）")
+            else:
+                self._log("")
+                self._log("  [配置] 跳过复位流程 (WORKFLOW_RESET_AFTER_TASK=false)")
+                self._log("")
 
     def _execute_step(
         self,
@@ -814,16 +901,30 @@ class WorkflowExecutor:
 
     def _action_input_text(self, target: Optional[str], text: str) -> Dict[str, Any]:
         """输入文字"""
+        self._log(f"  [input_text] 开始，目标={target}, 文字={text[:20]}...")
+
         # 如果指定了目标，先点击激活
         if target:
+            self._log(f"  [input_text] 步骤1: 点击输入框")
             tap_result = self._action_tap(target)
             if not tap_result["success"]:
                 return tap_result
-            time.sleep(0.3)
+            time.sleep(0.5)  # 等待输入框获得焦点
 
-        # 输入文字
-        self.runner.adb.input_text(text)
-        return {"success": True, "message": f"输入文字: {text[:20]}..."}
+        # 先清空输入框（全选+删除）
+        self._log(f"  [input_text] 步骤2: 清空输入框")
+        self.runner.adb.clear_text_field()
+        time.sleep(0.5)  # 等待清空完成
+
+        # 输入文字（使用支持中文的方法）
+        self._log(f"  [input_text] 步骤3: 输入文字")
+        success = self.runner.adb.input_text_chinese(text)
+        if success:
+            self._log(f"  [input_text] 完成")
+            return {"success": True, "message": f"输入文字: {text[:20]}..."}
+        else:
+            self._log(f"  [input_text] 失败")
+            return {"success": False, "message": f"输入文字失败: {text[:20]}..."}
 
     def _action_swipe(self, direction: str) -> Dict[str, Any]:
         """滑动操作"""
@@ -852,8 +953,8 @@ class WorkflowExecutor:
 
         time.sleep(0.5)
 
-        # 输入搜索关键词
-        self.runner.adb.input_text(target)
+        # 输入搜索关键词（使用支持中文的方法）
+        self.runner.adb.input_text_chinese(target)
         time.sleep(1)
 
         # 在搜索结果中查找
@@ -878,27 +979,154 @@ class WorkflowExecutor:
 
         Returns:
             (x, y) 坐标或 None
+
+        Note:
+            当 self._local_only=True 时，使用 OPENCV_ONLY 策略，不回退 AI
         """
-        # 动态描述 - 使用 AI（VisionAgent）
+        # 动态描述 - 需要 AI（VisionAgent）
         if target.startswith("dynamic:"):
+            if self._local_only:
+                self._log(f"  [local_only] 跳过动态目标: {target}")
+                return None
             description = target[8:]
             return self.runner.locator.find_element(screenshot, description)
 
-        # 参考图 - 优先 OpenCV
-        # 尝试从 handler 获取参考图
-        ref_path = self.handler.get_image_path(target)
-        if ref_path and ref_path.exists():
+        # 参考图 - 根据 local_only 选择策略
+        # 获取所有变体路径（主图 + _v1, _v2, ...）
+        ref_paths = self.handler.get_image_variants(target)
+        if ref_paths:
             screenshot_bytes = self._image_to_bytes(screenshot)
-            result = self.runner.hybrid_locator.locate(
-                screenshot_bytes,
-                ref_path,
-                LocateStrategy.OPENCV_FIRST
-            )
-            if result.success:
-                return (result.center_x, result.center_y)
+            # local_only 模式使用 OPENCV_ONLY，否则使用 OPENCV_FIRST（带AI回退）
+            strategy = LocateStrategy.OPENCV_ONLY if self._local_only else LocateStrategy.OPENCV_FIRST
 
-        # 回退到 AI（VisionAgent）
-        return self.runner.locator.find_element(screenshot, target)
+            # 尝试所有变体
+            for ref_path in ref_paths:
+                result = self.runner.hybrid_locator.locate(
+                    screenshot_bytes,
+                    ref_path,
+                    strategy
+                )
+                if result.success:
+                    self._log(f"  匹配成功: {ref_path.name}")
+                    return (result.center_x, result.center_y)
+
+            # 所有变体都失败
+            if self._local_only:
+                self._log(f"  [local_only] OpenCV匹配失败（已尝试 {len(ref_paths)} 个变体）: {target}")
+                return None
+
+        # 非 local_only 模式才回退到 AI（VisionAgent）
+        if not self._local_only:
+            return self.runner.locator.find_element(screenshot, target)
+
+        return None
+
+    def _get_contact_english_name(self, contact: str) -> Optional[str]:
+        """
+        从别名系统获取联系人的英文标识
+
+        例如: 张华 -> contacts/wechat_contacts_zhanghua -> zhanghua
+
+        Args:
+            contact: 联系人中文名
+
+        Returns:
+            英文标识，如 "zhanghua"，未找到则返回 None
+        """
+        # 通过别名获取参考图路径
+        ref_path = self.handler.get_image_path(contact)
+        if not ref_path:
+            return None
+
+        # 从路径中提取英文名
+        # 例如: contacts/wechat_contacts_zhanghua.png -> zhanghua
+        filename = ref_path.stem  # wechat_contacts_zhanghua
+        prefix = "wechat_contacts_"
+        if filename.startswith(prefix):
+            return filename[len(prefix):]  # zhanghua
+
+        return None
+
+    def _check_smart_skip(
+        self,
+        workflow: Workflow,
+        params: Dict[str, Any]
+    ) -> int:
+        """
+        智能检测是否可以跳过前置步骤
+
+        检测逻辑：
+        - send_message_local: 如果已在与该联系人的聊天界面，跳过点击联系人步骤
+        - post_moments_only_text_local: 如果已在朋友圈页面，跳过导航步骤
+
+        Args:
+            workflow: 当前工作流
+            params: 工作流参数
+
+        Returns:
+            可跳过的步骤数（0 表示不跳过）
+        """
+        # 只在 local_only 模式下启用智能跳过
+        if not self._local_only:
+            return 0
+
+        self._log("  [智能跳过] 检测当前界面...")
+
+        # 获取裁剪后的截图
+        screenshot, top_offset = self.runner._capture_screenshot_cropped()
+        screenshot_bytes = self._image_to_bytes(screenshot)
+
+        # 根据工作流类型进行检测
+        if workflow.name == "send_message_local":
+            # 检测是否已在与指定联系人的聊天界面
+            contact = params.get("contact", "")
+            if contact:
+                # 通过别名系统获取联系人的英文标识
+                # 例如: 张华 -> contacts/wechat_contacts_zhanghua -> 提取 zhanghua
+                contact_english = self._get_contact_english_name(contact)
+                if contact_english:
+                    chat_ref_name = f"wechat_chatting_with_{contact_english}"
+                else:
+                    # 如果没有找到别名，直接用原名尝试
+                    chat_ref_name = f"wechat_chatting_with_{contact}"
+
+                chat_ref_paths = self.handler.get_image_variants(chat_ref_name)
+
+                if chat_ref_paths:
+                    self._log(f"  [智能跳过] 检测是否在 {contact} 的聊天界面 (参考图: {chat_ref_name})...")
+                    for ref_path in chat_ref_paths:
+                        result = self.runner.hybrid_locator.locate(
+                            screenshot_bytes,
+                            ref_path,
+                            LocateStrategy.OPENCV_ONLY
+                        )
+                        if result.success:
+                            self._log(f"  [智能跳过] ✓ 已在 {contact} 的聊天界面 (匹配: {ref_path.name})")
+                            return 1  # 跳过第一步（点击联系人）
+                    self._log(f"  [智能跳过] 未检测到 {contact} 的聊天界面")
+                else:
+                    self._log(f"  [智能跳过] 没有 {chat_ref_name} 参考图，跳过检测")
+
+        elif workflow.name == "post_moments_only_text_local":
+            # 检测是否已在朋友圈页面（通过相机图标判定）
+            camera_ref_paths = self.handler.get_image_variants("wechat_moments_camera")
+
+            if camera_ref_paths:
+                self._log(f"  [智能跳过] 检测是否在朋友圈页面...")
+                for ref_path in camera_ref_paths:
+                    result = self.runner.hybrid_locator.locate(
+                        screenshot_bytes,
+                        ref_path,
+                        LocateStrategy.OPENCV_ONLY
+                    )
+                    if result.success:
+                        self._log(f"  [智能跳过] ✓ 已在朋友圈页面 (匹配: {ref_path.name})")
+                        return 2  # 跳过前两步（点击发现Tab + 点击朋友圈入口）
+                self._log(f"  [智能跳过] 未检测到朋友圈页面")
+            else:
+                self._log(f"  [智能跳过] 没有 wechat_moments_camera 参考图，跳过检测")
+
+        return 0
 
     def _try_recover(self, failed_step: NavStep, params: Dict[str, Any]) -> bool:
         """
@@ -924,7 +1152,7 @@ class WorkflowExecutor:
             return True
 
         # 尝试导航回首页
-        return self.navigate_to_home(max_attempts=3)
+        return self.navigate_to_home(max_attempts=config.WORKFLOW_RECOVER_NAV_ATTEMPTS)
 
     def _render_template(self, template: Optional[str], params: Dict[str, Any]) -> Optional[str]:
         """渲染模板字符串，替换 {param} 占位符"""

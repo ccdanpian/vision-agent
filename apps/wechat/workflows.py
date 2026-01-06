@@ -415,15 +415,129 @@ WORKFLOW_ADD_FRIEND = Workflow(
 
 
 # ============================================================
+# 发消息工作流 - 本地匹配版本（无AI回退）
+# ============================================================
+
+WORKFLOW_SEND_MESSAGE_LOCAL = Workflow(
+    name="send_message_local",
+    description="给联系人发送消息（纯本地匹配）",
+
+    valid_start_screens=[WeChatScreen.HOME],
+
+    nav_to_start=NAV_TO_HOME,
+
+    steps=[
+        # 1. 用联系人参考图在聊天列表定位（通过别名系统映射）
+        NavStep(
+            action="tap",
+            target="{contact}",  # 通过别名系统映射到 contacts/ 目录下的参考图
+            description="点击联系人 {contact}",
+            expect_screen=WeChatScreen.CHAT
+        ),
+        # 2. 点击输入框（使用参考图）
+        NavStep(
+            action="input_text",
+            target="wechat_chat_input",
+            params={"text": "{message}"},
+            description="输入消息内容"
+        ),
+        # 3. 点击发送按钮（使用参考图）
+        NavStep(
+            action="tap",
+            target="wechat_chat_send",
+            description="点击发送按钮"
+        ),
+        # 4. 等待发送完成
+        NavStep(
+            action="wait",
+            params={"duration": 500},
+            description="等待消息发送"
+        ),
+    ],
+
+    end_screen=WeChatScreen.CHAT,
+    required_params=["contact", "message"],
+)
+
+
+# ============================================================
+# 发朋友圈工作流 - 本地匹配版本（无AI回退）
+# ============================================================
+
+WORKFLOW_POST_MOMENTS_ONLY_TEXT_LOCAL = Workflow(
+    name="post_moments_only_text_local",
+    description="发布纯文字朋友圈（纯本地匹配）",
+
+    valid_start_screens=[WeChatScreen.HOME],
+
+    nav_to_start=NAV_TO_HOME,
+
+    steps=[
+        # 1. 点击发现 Tab（使用参考图）
+        NavStep(
+            action="tap",
+            target="wechat_tab_discover_button",
+            description="点击发现Tab",
+            expect_screen=WeChatScreen.DISCOVER
+        ),
+        # 2. 点击朋友圈入口（使用参考图）
+        NavStep(
+            action="tap",
+            target="wechat_moments_entry",
+            description="点击朋友圈",
+            expect_screen=WeChatScreen.MOMENTS
+        ),
+        # 3. 长按相机图标发纯文字（使用参考图）
+        NavStep(
+            action="long_press",
+            target="wechat_moments_camera",
+            description="长按相机图标",
+            expect_screen=WeChatScreen.MOMENTS_POST
+        ),
+        # 4. 输入文字内容（使用参考图定位输入框）
+        NavStep(
+            action="input_text",
+            target="wechat_moments_input_box",
+            params={"text": "{content}"},
+            description="输入朋友圈内容"
+        ),
+        # 5. 点击发表（使用参考图）
+        NavStep(
+            action="tap",
+            target="wechat_moments_publish",
+            description="点击发表按钮"
+        ),
+        # 6. 等待发布完成
+        NavStep(
+            action="wait",
+            params={"duration": 1000},
+            description="等待发布完成"
+        ),
+    ],
+
+    end_screen=WeChatScreen.MOMENTS,
+    required_params=["content"],
+)
+
+
+# ============================================================
 # 工作流注册表
 # ============================================================
 
 WORKFLOWS: Dict[str, Workflow] = {
     "send_message": WORKFLOW_SEND_MESSAGE,
+    "send_message_local": WORKFLOW_SEND_MESSAGE_LOCAL,
     "post_moments": WORKFLOW_POST_MOMENTS,
+    "post_moments_only_text_local": WORKFLOW_POST_MOMENTS_ONLY_TEXT_LOCAL,
     "message_and_moments": WORKFLOW_MESSAGE_AND_MOMENTS,
     "search_contact": WORKFLOW_SEARCH_CONTACT,
     "add_friend": WORKFLOW_ADD_FRIEND,
+}
+
+# Local 工作流映射（用于回退）
+LOCAL_TO_NORMAL_WORKFLOW = {
+    "send_message_local": "send_message",
+    "post_moments_only_text_local": "post_moments",
 }
 
 

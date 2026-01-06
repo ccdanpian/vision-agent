@@ -188,12 +188,56 @@ WORKFLOW_EXAMPLE = Workflow(
 
 
 # ============================================================
+# Local 工作流示例（纯本地匹配，无AI回退）
+# ============================================================
+
+# 示例：发消息工作流的 local 版本
+# WORKFLOW_SEND_MESSAGE_LOCAL = Workflow(
+#     name="send_message_local",
+#     description="发送消息（纯本地匹配）",
+#     valid_start_screens=[{Channel}Screen.HOME],
+#     nav_to_start=NAV_TO_HOME,
+#     steps=[
+#         # 使用参考图直接定位，不使用 find_or_search
+#         NavStep(
+#             action="tap",
+#             target="{contact}",  # 通过别名系统映射到 contacts/ 目录下的参考图
+#             description="点击联系人 {contact}",
+#         ),
+#         NavStep(
+#             action="input_text",
+#             target="{channel}_chat_input",
+#             params={"text": "{message}"},
+#             description="输入消息内容"
+#         ),
+#         NavStep(
+#             action="tap",
+#             target="{channel}_chat_send",
+#             description="点击发送按钮"
+#         ),
+#     ],
+#     end_screen={Channel}Screen.HOME,
+#     required_params=["contact", "message"],
+# )
+
+
+# ============================================================
 # 工作流注册表
 # ============================================================
 
 WORKFLOWS: Dict[str, Workflow] = {
     "example_workflow": WORKFLOW_EXAMPLE,
     # TODO: 注册更多工作流
+    # 普通工作流
+    # "send_message": WORKFLOW_SEND_MESSAGE,
+    # Local 工作流（纯本地匹配）
+    # "send_message_local": WORKFLOW_SEND_MESSAGE_LOCAL,
+}
+
+# Local 工作流映射（用于回退：local 版本 -> 正常版本）
+LOCAL_TO_NORMAL_WORKFLOW = {
+    # "send_message_local": "send_message",
+    # "post_moments_local": "post_moments",
 }
 
 

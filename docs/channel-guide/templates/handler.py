@@ -15,7 +15,7 @@ from typing import Optional, Dict, Any
 
 from apps.base import DefaultHandler
 from .workflows import (
-    Workflow, {Channel}Screen, WORKFLOWS,
+    Workflow, {Channel}Screen, WORKFLOWS, LOCAL_TO_NORMAL_WORKFLOW,
     match_workflow, is_complex_task, get_workflow_descriptions,
     SCREEN_DETECT_REFS
 )
@@ -143,7 +143,8 @@ class Handler(DefaultHandler):
     def execute_workflow(
         self,
         workflow_name: str,
-        params: Dict[str, Any]
+        params: Dict[str, Any],
+        local_only: bool = False
     ) -> Dict[str, Any]:
         """
         执行指定工作流
@@ -151,6 +152,7 @@ class Handler(DefaultHandler):
         Args:
             workflow_name: 工作流名称
             params: 工作流参数
+            local_only: 是否仅使用本地匹配（禁用AI回退）
 
         Returns:
             执行结果
@@ -168,51 +170,163 @@ class Handler(DefaultHandler):
             }
 
         workflow = WORKFLOWS[workflow_name]
-        return self._workflow_executor.execute_workflow(workflow, params)
+        return self._workflow_executor.execute_workflow(workflow, params, local_only)
 
-    def execute_task_with_workflow(self, task: str) -> Optional[Dict[str, Any]]:
+    def _map_type_to_workflow(self, task_type: str, local_only: bool = False) -> Optional[str]:
+        """
+        将任务类型映射到工作流名称
+
+        Args:
+            task_type: 任务类型（如 send_msg, post_moment_only_text）
+            local_only: 是否使用 local_only 版本的工作流
+
+        Returns:
+            工作流名称，如果无法映射则返回 None
+
+        注意：每个频道需要根据自己的工作流定义维护此映射表
+        """
+        if local_only:
+            # Local 版本映射（纯本地匹配，无AI回退）
+            # TODO: 根据频道实际的工作流定义修改此映射表
+            type_to_workflow_map = {
+                # "send_msg": "send_message_local",
+                # "post_moment_only_text": "post_moments_only_text_local",
+            }
+        else:
+            # 正常版本映射
+            # TODO: 根据频道实际的工作流定义修改此映射表
+            type_to_workflow_map = {
+                # "send_msg": "send_message",
+                # "post_moment_only_text": "post_moments",
+            }
+        return type_to_workflow_map.get(task_type)
+
+    def _map_parsed_data_to_workflow_params(
+        self,
+        parsed_data: Dict[str, Any],
+        workflow_name: str
+    ) -> Dict[str, Any]:
+        """
+        将 TaskClassifier 解析的数据映射到工作流参数
+
+        Args:
+            parsed_data: TaskClassifier 返回的解析数据
+            workflow_name: 目标工作流名称
+
+        Returns:
+            工作流参数字典
+        """
+        # TODO: 根据频道实际的工作流参数定义修改此映射
+        params = {}
+        if "contact" in parsed_data:
+            params["contact"] = parsed_data["contact"]
+        if "content" in parsed_data:
+            params["content"] = parsed_data["content"]
+        return params
+
+    def execute_task_with_workflow(
+        self,
+        task: str,
+        task_type = None,
+        parsed_data: Dict[str, Any] = None
+    ) -> Optional[Dict[str, Any]]:
         """
         尝试使用工作流执行任务
 
         流程：
-        1. 简单任务 -> 规则匹配
-        2. 复杂任务 -> LLM 选择
+        1. 如果有 parsed_data.type -> 直接根据 type 选择工作流
+        2. 简单任务（有 local 版本）-> 先尝试 local_only，失败回退到正常模式
+        3. 复杂任务 -> LLM 选择
+        4. 简单任务 -> 规则匹配（兼容旧逻辑）
 
         Args:
             task: 用户任务描述
+            task_type: 任务类型（可选）
+            parsed_data: 已解析的任务数据（可选，包含 type, contact, content 等）
 
         Returns:
             执行结果，如果没有匹配的工作流则返回 None
         """
         workflow_name = None
         params = {}
+        task_parsed_type = None
 
-        # 1. 检查是否为复杂任务
-        if is_complex_task(task):
+        # 1. 如果已经解析出 type，直接根据 type 选择工作流
+        if parsed_data and parsed_data.get("type"):
+            task_parsed_type = parsed_data["type"]
+            workflow_name = self._map_type_to_workflow(task_parsed_type)
+
+            if workflow_name:
+                params = self._map_parsed_data_to_workflow_params(parsed_data, workflow_name)
+                self._log(f"根据 type 选择工作流: {workflow_name} (type={task_parsed_type})")
+
+        # 2. 简单任务优先尝试 local_only 模式
+        # TODO: 根据频道实际配置调整支持 local_only 的任务类型
+        local_workflow_types = set()  # 例如: {"send_msg", "post_moment_only_text"}
+        can_try_local = task_parsed_type in local_workflow_types
+
+        if can_try_local and workflow_name:
+            self._log(f"")
+            self._log(f"+" + "=" * 40 + "+")
+            self._log(f"|    【优化模式】尝试纯本地匹配执行       |")
+            self._log(f"+" + "=" * 40 + "+")
+            self._log(f"")
+
+            # 获取 local 版本工作流
+            local_workflow_name = self._map_type_to_workflow(task_parsed_type, local_only=True)
+            if local_workflow_name:
+                local_params = self._map_parsed_data_to_workflow_params(parsed_data, local_workflow_name)
+                self._log(f"执行 local 工作流: {local_workflow_name}, 参数: {local_params}")
+
+                # 执行 local_only 版本（使用 OPENCV_ONLY 策略）
+                result = self.execute_workflow(local_workflow_name, local_params, local_only=True)
+
+                if result["success"]:
+                    self._log(f"V local_only 模式执行成功")
+                    return result
+
+                # local_only 失败，回退到正常模式
+                self._log(f"")
+                self._log(f"+" + "=" * 40 + "+")
+                self._log(f"|    【回退模式】local失败，使用正常流程   |")
+                self._log(f"+" + "=" * 40 + "+")
+                self._log(f"")
+                self._log(f"local 失败原因: {result.get('message', '未知')}")
+
+        # 3. 复杂任务使用 LLM 选择
+        if not workflow_name and task_type and hasattr(task_type, 'name') and task_type.name == 'COMPLEX':
             self._log(f"检测到复杂任务，使用 LLM 选择工作流")
             llm_result = self.select_workflow_with_llm(task)
             if llm_result:
                 workflow_name = llm_result["workflow_name"]
                 params = llm_result["params"]
                 self._log(f"LLM 选择工作流: {workflow_name}, 参数: {params}")
-        else:
-            # 2. 简单任务使用规则匹配
-            match_result = self.match_workflow(task)
-            if match_result:
-                workflow = match_result["workflow"]
-                workflow_name = workflow.name
-                param_hints = match_result["param_hints"]
-                params = parse_task_params(task, param_hints)
-                self._log(f"规则匹配工作流: {workflow_name}, 参数: {params}")
 
-        # 3. 如果没有匹配到工作流
+        # 4. 简单任务但没有 type -> 规则匹配工作流（兼容旧逻辑）
+        if not workflow_name:
+            if is_complex_task(task):
+                self._log(f"检测到复杂任务，使用 LLM 选择工作流")
+                llm_result = self.select_workflow_with_llm(task)
+                if llm_result:
+                    workflow_name = llm_result["workflow_name"]
+                    params = llm_result["params"]
+            else:
+                match_result = self.match_workflow(task)
+                if match_result:
+                    workflow = match_result["workflow"]
+                    workflow_name = workflow.name
+                    param_hints = match_result["param_hints"]
+                    params = parse_task_params(task, param_hints)
+                    self._log(f"规则匹配工作流: {workflow_name}, 参数: {params}")
+
+        # 5. 如果没有匹配到工作流
         if not workflow_name:
             self._log(f"未匹配到工作流: {task}")
             return None
 
-        # 4. 检查必需参数
+        # 6. 检查必需参数
         workflow = WORKFLOWS[workflow_name]
-        missing = [p for p in workflow.required_params if p not in params]
+        missing = [p for p in workflow.required_params if p not in params or not params[p]]
         if missing:
             self._log(f"缺少必需参数: {missing}")
             return {
@@ -223,8 +337,8 @@ class Handler(DefaultHandler):
                 "missing_params": missing
             }
 
-        # 5. 执行工作流
-        return self.execute_workflow(workflow_name, params)
+        # 7. 执行工作流（正常模式）
+        return self.execute_workflow(workflow_name, params, local_only=False)
 
     def detect_current_screen(self) -> {Channel}Screen:
         """检测当前界面"""

@@ -609,6 +609,14 @@ If not found:
                     confidence = data.get("confidence", 0)
                     matched_text = data.get("matched_text", "")
                     self._log(f"find_element 结果: bbox -> ({x}, {y}), confidence={confidence}, text='{matched_text}'")
+
+                    # 检查置信度阈值
+                    import config
+                    threshold = getattr(config, 'AI_LOCATE_CONFIDENCE_THRESHOLD', 0.6)
+                    if confidence < threshold:
+                        self._log(f"  ⚠ 置信度 {confidence} 低于阈值 {threshold}，拒绝此定位结果")
+                        return None
+
                     return (x, y)
 
                 # 兼容旧格式
@@ -718,6 +726,14 @@ If not found:
                     confidence = data.get("confidence", 0)
                     multiple = data.get("multiple_matches", False)
                     self._log(f"find_element_by_image 结果: bbox -> ({x}, {y}), confidence={confidence}, multiple={multiple}")
+
+                    # 检查置信度阈值
+                    import config
+                    threshold = getattr(config, 'AI_LOCATE_CONFIDENCE_THRESHOLD', 0.6)
+                    if confidence < threshold:
+                        self._log(f"  ⚠ 置信度 {confidence} 低于阈值 {threshold}，拒绝此定位结果")
+                        return None
+
                     return (x, y)
 
                 self._log(f"find_element_by_image 结果: 返回数据格式错误")
