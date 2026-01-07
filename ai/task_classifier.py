@@ -348,6 +348,15 @@ class TaskClassifier:
         self._log(f"正则判断：简单任务")
         return TaskType.SIMPLE
 
+    def _ensure_llm_agent(self):
+        """确保 LLM agent 已初始化"""
+        if not hasattr(self, 'llm_agent') or self.llm_agent is None:
+            from ai.vision_agent import VisionAgent
+            # 使用主 LLM 配置
+            self.llm_config = LLMConfig.from_env()
+            self.llm_agent = VisionAgent(llm_config=self.llm_config)
+            self.llm_agent.set_logger(self._log)
+
     def _classify_with_llm(self, task: str) -> TaskType:
         """
         使用LLM判断任务类型
@@ -358,6 +367,9 @@ class TaskClassifier:
         Returns:
             TaskType
         """
+        # 确保 LLM agent 存在
+        self._ensure_llm_agent()
+
         system_prompt = """你是一个解析器，只输出JSON。字段包含：type(send_msg/post_moment_only_text/others/invalid), recipient, content
 
 type 说明：
