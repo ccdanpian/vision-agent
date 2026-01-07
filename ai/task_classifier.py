@@ -169,7 +169,9 @@ class TaskClassifier:
         """
         检查是否为 SS 快速模式
 
-        SS 模式以 ss/SS/Ss/sS 开头（不区分大小写）
+        快速模式格式：
+        1. 联系人:消息内容  (冒号分隔)
+        2. 联系人 消息内容  (空格分隔，联系人需满足长度限制)
 
         Args:
             task: 用户任务描述
@@ -178,22 +180,45 @@ class TaskClassifier:
             True 表示是 SS 模式
         """
         task_stripped = task.strip()
-        return task_stripped.lower().startswith('ss')
+        if not task_stripped:
+            return False
+
+        # 归一化冒号
+        normalized = task_stripped.replace('：', ':')
+
+        # 检查冒号分隔格式：联系人:消息
+        if ':' in normalized:
+            parts = normalized.split(':', 1)
+            if len(parts) == 2 and parts[0].strip() and parts[1].strip():
+                return True
+
+        # 检查空格分隔格式：联系人 消息（联系人需满足长度限制）
+        space_parts = normalized.split(None, 1)
+        if len(space_parts) == 2:
+            first_word = space_parts[0].strip()
+            rest = space_parts[1].strip()
+            if first_word and rest:
+                # 朋友圈相关关键词无长度限制
+                if first_word.lower() in ['朋友圈', '朋友', 'pyq']:
+                    return True
+                # 其他情况检查长度限制
+                if self._is_valid_recipient_length(first_word):
+                    return True
+
+        return False
 
     def _parse_ss_mode(self, task: str) -> Optional[Dict[str, Any]]:
         """
         解析 SS 快速模式的指令
 
         支持的格式：
-        1. ss:联系人:消息内容  (默认发消息，冒号分隔)
-        2. ss:朋友圈:消息内容  (发朋友圈，冒号分隔)
-        3. ss:pyq:消息内容     (发朋友圈别名，冒号分隔)
-        4. ss 联系人 消息内容  (空格分隔，联系人需满足长度限制)
-        5. ss 朋友圈 消息内容  (空格分隔，朋友圈无长度限制)
+        1. 联系人:消息内容  (冒号分隔)
+        2. 朋友圈:消息内容  (发朋友圈，冒号分隔)
+        3. 联系人 消息内容  (空格分隔，联系人需满足长度限制)
+        4. 朋友圈 消息内容  (空格分隔，朋友圈无长度限制)
 
         冒号不区分中英文（: 或 ：）
         空格分隔时，第一个词如果不是"朋友圈"或"朋友"，则不能超过4个汉字或8个英文字母
-        关键词不区分大小写
 
         Args:
             task: 用户任务描述
@@ -203,33 +228,32 @@ class TaskClassifier:
             如果解析失败返回 None
         """
         # 归一化冒号（中英文统一为英文冒号）
-        normalized_task = task.replace('：', ':')
+        normalized_task = task.strip().replace('：', ':')
 
         # 优先尝试冒号分割
-        parts = normalized_task.split(':')
-
-        if len(parts) >= 3:
-            # 冒号分隔成功
-            return self._parse_ss_parts(parts, separator=':')
+        if ':' in normalized_task:
+            parts = normalized_task.split(':', 1)
+            if len(parts) == 2 and parts[0].strip() and parts[1].strip():
+                return self._parse_ss_parts(parts[0].strip(), parts[1].strip())
 
         # 冒号分隔失败，尝试空格分隔
-        self._log(f"冒号分隔不足3部分，尝试空格分隔")
-        space_parts = normalized_task.split(None, 2)  # 最多分割2次，保留消息内容中的空格
+        self._log(f"冒号分隔失败，尝试空格分隔")
+        space_parts = normalized_task.split(None, 1)  # 最多分割1次
 
-        if len(space_parts) >= 3:
-            # 验证第一个词（联系人）的长度限制
-            first_param = space_parts[1].strip()
-            first_param_lower = first_param.lower()
+        if len(space_parts) == 2:
+            first_word = space_parts[0].strip()
+            content = space_parts[1].strip()
 
-            # 朋友圈相关关键词无长度限制
-            if first_param_lower not in ['朋友圈', '朋友', 'pyq']:
-                if not self._is_valid_recipient_length(first_param):
-                    self._log(f"空格分隔失败：联系人'{first_param}'超过长度限制（4汉字/8英文）")
-                    return None
+            if first_word and content:
+                # 朋友圈相关关键词无长度限制
+                if first_word.lower() not in ['朋友圈', '朋友', 'pyq']:
+                    if not self._is_valid_recipient_length(first_word):
+                        self._log(f"空格分隔失败：'{first_word}'超过长度限制（4汉字/8英文）")
+                        return None
 
-            return self._parse_ss_parts(space_parts, separator=' ')
+                return self._parse_ss_parts(first_word, content)
 
-        self._log(f"SS 模式格式错误：分隔的部分少于3个")
+        self._log(f"SS 模式格式错误：无法解析")
         return None
 
     def _is_valid_recipient_length(self, recipient: str) -> bool:
@@ -258,23 +282,21 @@ class TaskClassifier:
 
         return length <= 8  # 4汉字 = 8，8英文 = 8
 
-    def _parse_ss_parts(self, parts: list, separator: str) -> Optional[Dict[str, Any]]:
+    def _parse_ss_parts(self, target: str, content: str) -> Optional[Dict[str, Any]]:
         """
-        解析已分割的 SS 模式部分
+        解析 SS 模式的目标和内容
 
         Args:
-            parts: 分割后的部分列表 [ss前缀, 联系人/朋友圈, 消息内容...]
-            separator: 使用的分隔符（用于合并消息内容）
+            target: 联系人名称或朋友圈关键词
+            content: 消息内容
 
         Returns:
             解析后的数据 {type, recipient, content}
         """
-        first_param = parts[1].strip().lower()
+        target_lower = target.lower()
 
         # 判断是否为朋友圈
-        if first_param in ['朋友圈', 'pyq', '朋友']:
-            # 发朋友圈
-            content = separator.join(parts[2:]).strip() if separator == ':' else parts[2].strip()
+        if target_lower in ['朋友圈', 'pyq', '朋友']:
             if not content:
                 self._log("SS 模式格式错误：发朋友圈缺少内容")
                 return None
@@ -286,10 +308,7 @@ class TaskClassifier:
             }
         else:
             # 默认为发消息
-            recipient = parts[1].strip()
-            content = separator.join(parts[2:]).strip() if separator == ':' else parts[2].strip()
-
-            if not recipient:
+            if not target:
                 self._log("SS 模式格式错误：发消息缺少联系人")
                 return None
             if not content:
@@ -298,7 +317,7 @@ class TaskClassifier:
 
             return {
                 "type": "send_msg",
-                "recipient": recipient,
+                "recipient": target,
                 "content": content
             }
 
