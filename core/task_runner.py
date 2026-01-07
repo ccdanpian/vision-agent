@@ -326,16 +326,27 @@ class TaskRunner:
                                 status=TaskStatus.SUCCESS,
                                 total_time=time.time() - start_time
                             )
-                        elif "missing_params" not in workflow_result:
-                            # 工作流执行失败（非参数缺失），返回失败
-                            self._log(f"工作流执行失败: {workflow_result.get('message')}")
+                        elif workflow_result.get("error_type") == "invalid_input":
+                            # 无效输入，直接返回失败
+                            self._log(f"无效输入: {workflow_result.get('message')}")
                             return TaskResult(
                                 status=TaskStatus.FAILED,
                                 total_time=time.time() - start_time,
-                                error_message=workflow_result.get("message", "工作流执行失败")
+                                error_message=workflow_result.get("message", "无效的输入指令")
                             )
-                        # 参数缺失，继续使用 AI 规划
-                        self._log(f"工作流参数不完整，回退到 AI 规划")
+                        elif "missing_params" not in workflow_result:
+                            # 工作流执行失败（非参数缺失），回退到 LLM 从头规划
+                            self._log(f"")
+                            self._log(f"╔════════════════════════════════════════╗")
+                            self._log(f"║  【回退】工作流失败，LLM从头规划任务    ║")
+                            self._log(f"╚════════════════════════════════════════╝")
+                            self._log(f"")
+                            self._log(f"工作流失败原因: {workflow_result.get('message')}")
+                            self._log(f"将原始任务交给 LLM 重新规划...")
+                            # 继续执行下面的 AI 规划逻辑，不返回失败
+                        else:
+                            # 参数缺失，继续使用 AI 规划
+                            self._log(f"工作流参数不完整，回退到 AI 规划")
 
                 # 尝试匹配简单任务模板
                 # 只有任务足够简单（无分隔符、无多动作词）且有 simple: true 的模板才会匹配

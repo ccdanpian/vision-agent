@@ -176,147 +176,142 @@ class Handler(DefaultHandler):
         尝试使用工作流执行任务
 
         流程：
-        1. 使用分类器分类并解析（支持 SS 快速模式和 LLM 智能模式）
-        2. 简单任务 -> 优先尝试 local_only 模式，失败后回退正常模式
-        3. 复杂任务 -> LLM 选择工作流
+        1. 正则分配（SS快速模式）
+           - 成功且简单任务 → local执行
+             - local失败 → LLM重新分配
+               - LLM简单任务 → 再次local执行
+                 - 再次失败 → 返回需要LLM从头规划
+               - LLM复杂任务 → 返回需要LLM从头规划
+           - 失败 → LLM分配
+             - LLM简单任务 → local执行
+               - 失败 → 返回需要LLM从头规划
+             - LLM复杂任务 → 返回需要LLM从头规划
 
         Args:
             task: 用户任务描述
 
         Returns:
-            执行结果，如果没有匹配的工作流则返回 None
+            执行结果，包含 need_llm_replan=True 表示需要 LLM 从头规划
         """
-        workflow_name = None
-        params = {}
+        classifier = get_task_classifier()
+        simple_task_types = {"send_msg", "post_moment_only_text"}
+
+        # ========== 第一步：正则分配（SS快速模式）==========
+        regex_success = False
+        parsed_data = None
         task_parsed_type = None
 
-        # 1. 使用分类器分类并解析（一次调用，同时获取分类和参数）
-        classifier = get_task_classifier()
-        task_type, parsed_data = classifier.classify_and_parse(task)
+        if classifier._is_ss_mode(task):
+            self._log(f"检测到 SS 快速模式，尝试正则解析")
+            parsed_data = classifier._parse_ss_mode(task)
+            if parsed_data and parsed_data.get("type"):
+                task_parsed_type = parsed_data["type"]
+                regex_success = True
+                self._log(f"正则解析成功: type={task_parsed_type}")
 
-        # 1.1 检查是否为无效输入
-        if parsed_data and parsed_data.get("type") == "invalid":
-            self._log(f"检测到无效输入: {task}")
-            return {
-                "success": False,
-                "message": "无效的输入指令。请输入有效的任务描述，例如：\n"
-                          "- 给张三发消息说你好\n"
-                          "- 发朋友圈今天天气真好\n"
-                          "- SS快速模式：ss:消息:张三:你好",
-                "error_type": "invalid_input"
-            }
+        # ========== 第二步：根据正则结果决定后续流程 ==========
+        if regex_success and task_parsed_type in simple_task_types:
+            # 正则成功且是简单任务 → local 执行
+            self._log(f"")
+            self._log(f"╔════════════════════════════════════════╗")
+            self._log(f"║   【正则分配成功】尝试 local 执行       ║")
+            self._log(f"╚════════════════════════════════════════╝")
+            self._log(f"")
 
-        # 2. 如果已经解析出 type，直接根据 type 选择工作流（SS 模式或 LLM 模式）
-        if parsed_data and parsed_data.get("type"):
-            task_parsed_type = parsed_data["type"]
-            workflow_name = self._map_type_to_workflow(task_parsed_type)
+            result = self._execute_local_workflow(task_parsed_type, parsed_data)
+            if result and result.get("success"):
+                return result
 
-            if workflow_name:
-                params = self._map_parsed_data_to_workflow_params(parsed_data, workflow_name)
-                self._log(f"根据 type 选择工作流: {workflow_name} (type={task_parsed_type})")
-                self._log(f"使用解析的参数: {params}")
+            # local 失败，LLM 重新分配
+            self._log(f"")
+            self._log(f"╔════════════════════════════════════════╗")
+            self._log(f"║   【local失败】LLM 重新分配任务         ║")
+            self._log(f"╚════════════════════════════════════════╝")
+            self._log(f"")
+            self._log(f"local 失败原因: {result.get('message', '未知') if result else '无结果'}")
+
+            classifier._ensure_llm_agent()
+            classifier._classify_with_llm(task)
+            llm_parsed_data = classifier._last_parsed_data
+
+            if llm_parsed_data and llm_parsed_data.get("type") == "invalid":
+                return {"success": False, "message": "无效的输入指令", "error_type": "invalid_input"}
+
+            if llm_parsed_data and llm_parsed_data.get("type") in simple_task_types:
+                # LLM 分配为简单任务 → 再次 local 执行
+                self._log(f"LLM 重新分配为简单任务: {llm_parsed_data.get('type')}")
+                result2 = self._execute_local_workflow(llm_parsed_data["type"], llm_parsed_data)
+                if result2 and result2.get("success"):
+                    return result2
+
+                # 再次失败 → 需要 LLM 从头规划
+                self._log(f"LLM 分配的简单任务 local 执行也失败，需要 LLM 从头规划")
+                return {"success": False, "need_llm_replan": True, "message": "简单任务执行失败，需要LLM从头规划"}
             else:
-                self._log(f"未知的任务类型: {task_parsed_type}")
-                return None
+                # LLM 分配为复杂任务或其他 → 需要 LLM 从头规划
+                self._log(f"LLM 分配为复杂/其他任务: {llm_parsed_data.get('type') if llm_parsed_data else 'None'}")
+                return {"success": False, "need_llm_replan": True, "message": "复杂任务，需要LLM从头规划"}
 
-        elif task_type == TaskType.COMPLEX:
-            # 复杂任务 -> LLM 选择工作流
-            self._log(f"检测到复杂任务，使用 LLM 选择工作流")
-            llm_result = self.select_workflow_with_llm(task)
-            if llm_result:
-                workflow_name = llm_result["workflow_name"]
-                params = llm_result["params"]
-                self._log(f"LLM 选择工作流: {workflow_name}, 参数: {params}")
         else:
-            # 3. 简单任务但没有 type -> 规则匹配工作流（兼容旧逻辑）
-            match_result = self.match_workflow(task)
-            if match_result:
-                workflow = match_result["workflow"]
-                workflow_name = workflow.name
-                param_hints = match_result["param_hints"]
+            # 正则失败或不是简单任务 → LLM 分配
+            self._log(f"")
+            self._log(f"╔════════════════════════════════════════╗")
+            self._log(f"║   【正则分配失败】LLM 分配任务          ║")
+            self._log(f"╚════════════════════════════════════════╝")
+            self._log(f"")
 
-                # 回退：正则表达式解析（兼容旧逻辑）
-                params = parse_task_params(task, param_hints)
-                self._log(f"规则匹配工作流: {workflow_name}")
-                self._log(f"使用正则解析的参数: {params}")
+            classifier._ensure_llm_agent()
+            classifier._classify_with_llm(task)
+            llm_parsed_data = classifier._last_parsed_data
 
-        # 3. 如果没有匹配到工作流
-        if not workflow_name:
-            self._log(f"未匹配到工作流: {task}")
+            if llm_parsed_data and llm_parsed_data.get("type") == "invalid":
+                return {"success": False, "message": "无效的输入指令", "error_type": "invalid_input"}
+
+            if llm_parsed_data and llm_parsed_data.get("type") in simple_task_types:
+                # LLM 分配为简单任务 → local 执行
+                self._log(f"LLM 分配为简单任务: {llm_parsed_data.get('type')}")
+                result = self._execute_local_workflow(llm_parsed_data["type"], llm_parsed_data)
+                if result and result.get("success"):
+                    return result
+
+                # 失败 → 需要 LLM 从头规划
+                self._log(f"LLM 分配的简单任务 local 执行失败，需要 LLM 从头规划")
+                return {"success": False, "need_llm_replan": True, "message": "简单任务执行失败，需要LLM从头规划"}
+            else:
+                # LLM 分配为复杂任务 → 需要 LLM 从头规划
+                self._log(f"LLM 分配为复杂/其他任务: {llm_parsed_data.get('type') if llm_parsed_data else 'None'}")
+                return {"success": False, "need_llm_replan": True, "message": "复杂任务，需要LLM从头规划"}
+
+    def _execute_local_workflow(self, task_type: str, parsed_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        执行 local 工作流
+
+        Args:
+            task_type: 任务类型 (send_msg, post_moment_only_text)
+            parsed_data: 解析的参数数据
+
+        Returns:
+            执行结果
+        """
+        workflow_name = self._map_type_to_workflow(task_type, local_only=False)
+        local_workflow_name = self._map_type_to_workflow(task_type, local_only=True)
+
+        if not workflow_name or not local_workflow_name:
+            self._log(f"无法映射工作流: {task_type}")
             return None
 
-        # 4. 检查必需参数
+        params = self._map_parsed_data_to_workflow_params(parsed_data, workflow_name)
+        self._log(f"执行 local 工作流: {local_workflow_name}, 参数: {params}")
+
+        # 检查必需参数
         workflow = WORKFLOWS[workflow_name]
         missing = [p for p in workflow.required_params if p not in params or not params[p]]
         if missing:
             self._log(f"缺少必需参数: {missing}")
-            return {
-                "success": False,
-                "message": f"无法从任务中解析出必需参数: {missing}",
-                "workflow": workflow_name,
-                "parsed_params": params,
-                "missing_params": missing
-            }
+            return {"success": False, "message": f"缺少必需参数: {missing}", "missing_params": missing}
 
-        # 5. 判断是否可以尝试 local_only 模式
-        # 只有简单任务（send_msg, post_moment_only_text）有 local 版本
-        local_workflow_types = {"send_msg", "post_moment_only_text"}
-        can_try_local = task_parsed_type in local_workflow_types
-
-        if can_try_local:
-            self._log(f"")
-            self._log(f"╔════════════════════════════════════════╗")
-            self._log(f"║    【优化模式】尝试纯本地匹配执行       ║")
-            self._log(f"╚════════════════════════════════════════╝")
-            self._log(f"")
-
-            # 获取 local 版本工作流
-            local_workflow_name = self._map_type_to_workflow(task_parsed_type, local_only=True)
-            if local_workflow_name:
-                self._log(f"执行 local 工作流: {local_workflow_name}")
-
-                # 执行 local_only 版本（使用 OPENCV_ONLY 策略）
-                result = self.execute_workflow(local_workflow_name, params, local_only=True)
-
-                if result["success"]:
-                    self._log(f"✓ local_only 模式执行成功")
-                    return result
-
-                # local_only 失败，回退到 LLM 模式重新解析
-                self._log(f"")
-                self._log(f"╔════════════════════════════════════════╗")
-                self._log(f"║  【回退模式】local失败，用LLM重新解析    ║")
-                self._log(f"╚════════════════════════════════════════╝")
-                self._log(f"")
-                self._log(f"local 失败原因: {result.get('message', '未知')}")
-
-                # 用 LLM 重新解析任务参数
-                self._log(f"调用 LLM 重新解析任务: {task}")
-                classifier._ensure_llm_agent()
-                new_task_type, new_parsed_data = classifier._classify_with_llm(task), classifier._last_parsed_data
-
-                if new_parsed_data and new_parsed_data.get("type") in ["send_msg", "post_moment_only_text"]:
-                    new_workflow_name = self._map_type_to_workflow(new_parsed_data["type"], local_only=False)
-                    if new_workflow_name:
-                        new_params = self._map_parsed_data_to_workflow_params(new_parsed_data, new_workflow_name)
-                        self._log(f"LLM 重新解析: workflow={new_workflow_name}, params={new_params}")
-
-                        # 检查新参数是否有效
-                        new_workflow = WORKFLOWS[new_workflow_name]
-                        new_missing = [p for p in new_workflow.required_params if p not in new_params or not new_params[p]]
-                        if not new_missing:
-                            workflow_name = new_workflow_name
-                            params = new_params
-                            self._log(f"使用 LLM 重新解析的参数执行")
-                        else:
-                            self._log(f"LLM 解析的参数仍缺少: {new_missing}，使用原参数")
-                    else:
-                        self._log(f"LLM 解析的类型无对应工作流，使用原参数")
-                else:
-                    self._log(f"LLM 重新解析失败或返回其他类型，使用原参数")
-
-        # 6. 正常模式执行（local_only=False）
-        return self.execute_workflow(workflow_name, params, local_only=False)
+        # 执行 local_only 版本
+        return self.execute_workflow(local_workflow_name, params, local_only=True)
 
     def _map_type_to_workflow(self, task_type: str, local_only: bool = False) -> Optional[str]:
         """
