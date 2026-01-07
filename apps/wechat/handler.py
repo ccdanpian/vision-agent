@@ -282,13 +282,38 @@ class Handler(DefaultHandler):
                     self._log(f"✓ local_only 模式执行成功")
                     return result
 
-                # local_only 失败，回退到正常模式
+                # local_only 失败，回退到 LLM 模式重新解析
                 self._log(f"")
                 self._log(f"╔════════════════════════════════════════╗")
-                self._log(f"║    【回退模式】local失败，使用正常流程   ║")
+                self._log(f"║  【回退模式】local失败，用LLM重新解析    ║")
                 self._log(f"╚════════════════════════════════════════╝")
                 self._log(f"")
                 self._log(f"local 失败原因: {result.get('message', '未知')}")
+
+                # 用 LLM 重新解析任务参数
+                self._log(f"调用 LLM 重新解析任务: {task}")
+                classifier._ensure_llm_agent()
+                new_task_type, new_parsed_data = classifier._classify_with_llm(task), classifier._last_parsed_data
+
+                if new_parsed_data and new_parsed_data.get("type") in ["send_msg", "post_moment_only_text"]:
+                    new_workflow_name = self._map_type_to_workflow(new_parsed_data["type"], local_only=False)
+                    if new_workflow_name:
+                        new_params = self._map_parsed_data_to_workflow_params(new_parsed_data, new_workflow_name)
+                        self._log(f"LLM 重新解析: workflow={new_workflow_name}, params={new_params}")
+
+                        # 检查新参数是否有效
+                        new_workflow = WORKFLOWS[new_workflow_name]
+                        new_missing = [p for p in new_workflow.required_params if p not in new_params or not new_params[p]]
+                        if not new_missing:
+                            workflow_name = new_workflow_name
+                            params = new_params
+                            self._log(f"使用 LLM 重新解析的参数执行")
+                        else:
+                            self._log(f"LLM 解析的参数仍缺少: {new_missing}，使用原参数")
+                    else:
+                        self._log(f"LLM 解析的类型无对应工作流，使用原参数")
+                else:
+                    self._log(f"LLM 重新解析失败或返回其他类型，使用原参数")
 
         # 6. 正常模式执行（local_only=False）
         return self.execute_workflow(workflow_name, params, local_only=False)
