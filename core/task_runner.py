@@ -1720,6 +1720,7 @@ class TaskRunner:
         skip_verify_actions = [
             ActionName.WAIT,        # 等待动作不需要屏幕变化
             ActionName.GO_HOME,     # 可能已在桌面
+            ActionName.SCREENSHOT,  # 截图不改变屏幕
         ]
 
         # PRESS_KEY 需要特殊处理：
