@@ -170,7 +170,7 @@ class TaskClassifier:
         检查是否为 SS 快速模式
 
         快速模式格式（无需 ss 前缀）：
-        1. 联系人:消息内容  (冒号分隔)
+        1. 联系人:消息内容  (冒号分隔，联系人需满足长度限制)
         2. 联系人 消息内容  (空格分隔，联系人需满足长度限制)
 
         Args:
@@ -189,8 +189,16 @@ class TaskClassifier:
         # 检查冒号分隔：联系人:消息
         if ':' in normalized:
             parts = normalized.split(':', 1)
-            if len(parts) == 2 and parts[0].strip() and parts[1].strip():
-                return True
+            if len(parts) == 2:
+                target = parts[0].strip()
+                content = parts[1].strip()
+                if target and content:
+                    # 朋友圈相关关键词无长度限制
+                    if target.lower() in ['朋友圈', '朋友', 'pyq']:
+                        return True
+                    # 其他情况检查长度限制（避免把自然语言当作快速模式）
+                    if self._is_valid_recipient_length(target):
+                        return True
 
         # 检查空格分隔：联系人 消息
         space_parts = normalized.split(None, 1)
