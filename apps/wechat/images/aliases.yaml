@@ -5,6 +5,7 @@
 aliases:
   # 联系人（存放在 contacts/ 子目录）
   张华: contacts/wechat_contacts_zhanghua
+  cc: contacts/wechat_contacts_cc
   # 首页
   微信首页: wechat_home
 
