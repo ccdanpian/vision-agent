@@ -864,6 +864,10 @@ class WorkflowExecutor:
                 # 先尝试直接找，找不到就搜索
                 return self._action_find_or_search(target, step_params.get("search_fallback", True))
 
+            elif action == "tap_or_search":
+                # 本地模式：先尝试直接点击，找不到就搜索（纯OpenCV）
+                return self._action_tap_or_search(target)
+
             elif action == "conditional":
                 # 条件执行（跳过处理）
                 return {"success": True, "message": "条件步骤跳过"}
@@ -964,6 +968,107 @@ class WorkflowExecutor:
             return {"success": True, "message": f"搜索找到: {target}", "data": coords}
 
         return {"success": False, "message": f"搜索未找到: {target}"}
+
+    def _action_tap_or_search(self, target: str) -> Dict[str, Any]:
+        """
+        点击目标，找不到则通过搜索查找（纯本地模式）
+
+        流程：
+        1. 先尝试在当前界面直接用 OpenCV 匹配目标
+        2. 如果找不到，点击搜索按钮
+        3. 输入目标名称搜索
+        4. 在搜索结果中用 OpenCV 匹配目标并点击
+
+        Args:
+            target: 目标名称（通过别名系统映射到参考图）
+
+        Returns:
+            执行结果
+        """
+        screenshot = self.runner._capture_screenshot()
+
+        # 1. 先尝试直接在当前界面找
+        self._log(f"  [tap_or_search] 尝试直接定位: {target}")
+        coords = self._locate_target(target, screenshot)
+        if coords:
+            x, y = coords
+            self.runner.adb.tap(x, y)
+            self._log(f"  [tap_or_search] 直接找到并点击: ({x}, {y})")
+            return {"success": True, "message": f"直接找到: {target}"}
+
+        # 2. 直接查找失败，使用搜索功能
+        self._log(f"  [tap_or_search] 直接查找失败，启用搜索回退")
+
+        # 2.1 点击搜索按钮
+        self._log(f"  [tap_or_search] 点击搜索按钮")
+        search_result = self._action_tap("wechat_search_button")
+        if not search_result["success"]:
+            return {"success": False, "message": "无法打开搜索"}
+
+        time.sleep(0.8)
+
+        # 2.2 输入搜索关键词
+        # 从别名系统获取原始中文名称用于搜索
+        search_term = self._get_search_term_from_alias(target)
+        self._log(f"  [tap_or_search] 输入搜索词: {search_term}")
+        self.runner.adb.input_text_chinese(search_term)
+        time.sleep(1.2)  # 等待搜索结果加载
+
+        # 2.3 在搜索结果中用 OpenCV 查找目标
+        screenshot = self.runner._capture_screenshot()
+        self._log(f"  [tap_or_search] 在搜索结果中查找: {target}")
+        coords = self._locate_target(target, screenshot)
+        if coords:
+            x, y = coords
+            self.runner.adb.tap(x, y)
+            self._log(f"  [tap_or_search] 搜索结果中找到并点击: ({x}, {y})")
+            return {"success": True, "message": f"搜索找到: {target}"}
+
+        # 2.4 如果 OpenCV 匹配失败，尝试点击搜索结果第一项（联系人区域）
+        # 搜索结果中联系人通常在固定位置
+        self._log(f"  [tap_or_search] OpenCV 未匹配，尝试点击搜索结果第一项")
+        screen_width, screen_height = self.runner.adb.get_screen_size()
+        # 搜索结果第一项大约在屏幕 y=350 位置（根据微信布局）
+        first_result_y = int(screen_height * 0.18)
+        first_result_x = int(screen_width * 0.5)
+        self.runner.adb.tap(first_result_x, first_result_y)
+
+        return {"success": True, "message": f"点击搜索结果第一项: {target}"}
+
+    def _get_search_term_from_alias(self, target: str) -> str:
+        """
+        从别名系统获取用于搜索的原始名称
+
+        例如：contacts/wechat_contacts_zhanghua -> 张华
+
+        Args:
+            target: 目标标识（可能是别名或直接的参考图名称）
+
+        Returns:
+            用于搜索的名称
+        """
+        # 如果是通过别名传入的（如 "张华"），直接返回
+        # 如果是参考图路径（如 "contacts/wechat_contacts_zhanghua"），需要反向查找
+
+        # 先尝试直接使用（可能已经是中文名）
+        if not target.startswith("contacts/") and not target.startswith("wechat_"):
+            return target
+
+        # 从别名映射中反向查找
+        from apps.wechat.handler import Handler
+        aliases = getattr(self.handler, '_aliases', None)
+        if aliases:
+            for alias, ref in aliases.items():
+                if ref == target or ref.endswith(target):
+                    return alias
+
+        # 无法反向查找，尝试从文件名提取
+        # contacts/wechat_contacts_zhanghua -> zhanghua
+        if "contacts_" in target:
+            name_part = target.split("contacts_")[-1]
+            return name_part
+
+        return target
 
     def _locate_target(
         self,

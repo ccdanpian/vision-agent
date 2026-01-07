@@ -427,11 +427,12 @@ WORKFLOW_SEND_MESSAGE_LOCAL = Workflow(
     nav_to_start=NAV_TO_HOME,
 
     steps=[
-        # 1. 用联系人参考图在聊天列表定位（通过别名系统映射）
+        # 1. 用联系人参考图在聊天列表定位，找不到则搜索
+        # 流程：首页直接匹配 → 失败则点击搜索 → 输入名字 → 点击搜索结果
         NavStep(
-            action="tap",
+            action="tap_or_search",
             target="{contact}",  # 通过别名系统映射到 contacts/ 目录下的参考图
-            description="点击联系人 {contact}",
+            description="查找并点击联系人 {contact}",
             expect_screen=WeChatScreen.CHAT
         ),
         # 2. 点击输入框（使用参考图）
