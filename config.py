@@ -123,6 +123,13 @@ WORKFLOW_RESET_AFTER_TASK = os.getenv("WORKFLOW_RESET_AFTER_TASK", "false").lowe
 AI_LOCATE_CONFIDENCE_THRESHOLD = 0.6  # AI 定位最低置信度阈值（低于此值视为未找到）
 
 # ============================================================
+# OpenCV 定位配置
+# ============================================================
+OPENCV_TEMPLATE_THRESHOLD = float(os.getenv("OPENCV_TEMPLATE_THRESHOLD", "0.85"))  # 模板匹配阈值
+OPENCV_FEATURE_THRESHOLD = float(os.getenv("OPENCV_FEATURE_THRESHOLD", "0.9"))     # 特征点匹配 Lowe's ratio test 阈值
+OPENCV_FEATURE_CONFIDENCE_THRESHOLD = float(os.getenv("OPENCV_FEATURE_CONFIDENCE_THRESHOLD", "0.7"))  # 特征点匹配置信度阈值
+
+# ============================================================
 # 任务分类配置
 # ============================================================
 # 任务分类方式: regex（正则表达式） 或 llm（使用LLM判断）

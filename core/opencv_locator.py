@@ -14,6 +14,8 @@ from typing import Optional, Tuple, List, Dict, Any
 from dataclasses import dataclass
 from enum import Enum
 
+import config
+
 
 class MatchMethod(Enum):
     """匹配方法"""
@@ -45,17 +47,15 @@ class OpenCVLocator:
     使用模板匹配和特征点匹配来定位屏幕元素。
     """
 
-    # 模板匹配阈值
-    TEMPLATE_THRESHOLD = 0.75
-    # 特征点匹配阈值（用于 Lowe's ratio test）
-    FEATURE_THRESHOLD = 0.9
-    # 特征点匹配最终置信度阈值
-    FEATURE_CONFIDENCE_THRESHOLD = 0.7
     # 多尺度匹配的缩放范围
     SCALE_RANGE = (0.8, 1.2)
     SCALE_STEPS = 10
 
     def __init__(self):
+        # 从 config 读取阈值（支持环境变量配置）
+        self.TEMPLATE_THRESHOLD = config.OPENCV_TEMPLATE_THRESHOLD
+        self.FEATURE_THRESHOLD = config.OPENCV_FEATURE_THRESHOLD
+        self.FEATURE_CONFIDENCE_THRESHOLD = config.OPENCV_FEATURE_CONFIDENCE_THRESHOLD
         self._logger = None
         # 初始化特征检测器
         self._orb = cv2.ORB_create(nfeatures=1000)
