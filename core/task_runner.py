@@ -244,11 +244,12 @@ class TaskRunner:
         # 模块路由
         handler = None
         if self.use_modules:
-            # SS 模式特殊处理：根据解析结果的 type 直接路由
-            if task.strip().lower().startswith('ss:') or task.strip().lower().startswith('ss：'):
+            from ai.task_classifier import TaskClassifier
+            classifier = TaskClassifier()
+
+            # 检查是否为快速模式（联系人:消息 或 联系人 消息 格式）
+            if classifier._is_ss_mode(task):
                 self._log("检测到 SS 快速模式，尝试解析")
-                from ai.task_classifier import TaskClassifier
-                classifier = TaskClassifier()
                 task_type, parsed_data = classifier.classify_and_parse(task)
 
                 if parsed_data and parsed_data.get("type") and parsed_data["type"] != "invalid":
@@ -264,17 +265,8 @@ class TaskRunner:
                             self._current_handler = handler
                             self._log(f"SS 模式路由到模块: {handler.module_info.name} (type={parsed_data['type']})")
                 else:
-                    # SS 格式不符合规范，去掉前缀，回退到 LLM 分类模式
-                    self._log("SS 格式解析失败，去掉 'ss:' 前缀，使用 LLM 进行任务分类")
-                    # 去掉 ss: 或 ss： 前缀
-                    if task.lower().startswith('ss:'):
-                        task = task[3:].strip()
-                    elif task.lower().startswith('ss：'):
-                        task = task[3:].strip()
-                    self._log(f"转换后的任务: {task}")
-
-                    # 使用 LLM 模式重新分类
-                    self._log("调用 LLM 进行任务分类和参数提取")
+                    # SS 格式解析失败，回退到 LLM 分类模式
+                    self._log("SS 格式解析失败，使用 LLM 进行任务分类")
                     task_type, parsed_data = classifier.classify_and_parse(task)
 
                     if parsed_data and parsed_data.get("type") and parsed_data["type"] != "invalid":

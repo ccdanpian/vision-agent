@@ -374,16 +374,8 @@ def run_interactive_mode(device: str):
                     print("退出交互式模式")
                     return
 
-                # 处理任务输入
-                if mode_choice == '1':
-                    # 快速模式：自动添加 ss: 前缀（如果用户没有输入）
-                    if not task_input.lower().startswith('ss:'):
-                        task = f"ss:{task_input}"
-                    else:
-                        task = task_input
-                else:
-                    # 智能模式：直接使用用户输入
-                    task = task_input
+                # 处理任务输入（快速模式和智能模式都直接使用用户输入）
+                task = task_input
 
                 # 执行任务（带 invalid 重试逻辑）
                 # 返回 True 表示继续当前模式，False 表示需要重新选择模式
@@ -465,16 +457,8 @@ def _execute_task_with_retry(runner, task: str, mode_choice: str = '2', max_retr
                     print("取消当前任务")
                     break
 
-                # 处理新任务输入
-                if mode_choice == '1':
-                    # 快速模式：自动添加 ss: 前缀
-                    if not new_task_input.lower().startswith('ss:'):
-                        current_task = f"ss:{new_task_input}"
-                    else:
-                        current_task = new_task_input
-                else:
-                    # 智能模式：直接使用
-                    current_task = new_task_input
+                # 处理新任务输入（快速模式和智能模式都直接使用用户输入）
+                current_task = new_task_input
 
                 retry_count += 1
                 continue
