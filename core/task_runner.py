@@ -243,6 +243,7 @@ class TaskRunner:
 
         # 模块路由
         handler = None
+        parsed_data = None
         if self.use_modules:
             from ai.task_classifier import TaskClassifier
             classifier = TaskClassifier()
@@ -264,12 +265,25 @@ class TaskRunner:
                         if handler:
                             self._current_handler = handler
                             self._log(f"SS 模式路由到模块: {handler.module_info.name} (type={parsed_data['type']})")
-                else:
-                    # SS 格式解析失败，回退到 LLM 分类模式
-                    self._log("SS 格式解析失败，使用 LLM 进行任务分类")
-                    task_type, parsed_data = classifier.classify_and_parse(task)
 
-                    if parsed_data and parsed_data.get("type") and parsed_data["type"] != "invalid":
+            # 快速模式未匹配，使用 LLM 分类器进行分类
+            if handler is None:
+                self._log("快速模式未匹配，使用 LLM 进行任务分类")
+                task_type, parsed_data = classifier.classify_and_parse(task)
+
+                if parsed_data and parsed_data.get("type"):
+                    if parsed_data["type"] == "invalid":
+                        # LLM 判断为无效输入
+                        self._log("LLM 判断为无效输入")
+                        error_msg = "❌ 无效的输入指令，请检查格式后重试。"
+                        result = TaskResult(
+                            status=TaskStatus.FAILED,
+                            error_message=error_msg,
+                            total_time=0.0
+                        )
+                        self.state = TaskStatus.FAILED
+                        return result
+                    elif parsed_data["type"] in ["send_msg", "post_moment_only_text"]:
                         # LLM 分类成功，使用类型路由
                         self._log(f"LLM 分类成功: type={parsed_data['type']}")
                         type_to_module = {
@@ -282,24 +296,20 @@ class TaskRunner:
                             if handler:
                                 self._current_handler = handler
                                 self._log(f"LLM 模式路由到模块: {handler.module_info.name} (type={parsed_data['type']})")
-                    else:
-                        # LLM 分类也失败，返回错误，让用户重新选择模式
-                        self._log("LLM 分类失败或返回 invalid")
-                        error_msg = "❌ LLM分类失败，无法理解您的输入。\n请重新选择模式，或检查输入格式是否正确。"
-                        result = TaskResult(
-                            status=TaskStatus.FAILED,
-                            error_message=error_msg,
-                            total_time=0.0
-                        )
-                        self.state = TaskStatus.FAILED
-                        return result
+                    elif parsed_data["type"] == "others":
+                        # 复杂任务，使用关键词路由
+                        self._log("LLM 分类为复杂任务，使用关键词路由")
+                        handler, score = ModuleRegistry.route(task)
+                        if handler:
+                            self._current_handler = handler
+                            self._log(f"路由到模块: {handler.module_info.name} (匹配度: {score:.2f})")
 
-            # 非 SS 模式或 SS 模式回退后，使用关键词路由
+            # 如果仍无 handler，使用关键词路由作为兜底
             if handler is None:
                 handler, score = ModuleRegistry.route(task)
                 if handler:
                     self._current_handler = handler
-                    self._log(f"路由到模块: {handler.module_info.name} (匹配度: {score:.2f})")
+                    self._log(f"兜底路由到模块: {handler.module_info.name} (匹配度: {score:.2f})")
 
             # 设置 TaskRunner 引用（用于工作流执行）
             if handler:
