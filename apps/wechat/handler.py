@@ -234,8 +234,12 @@ class Handler(DefaultHandler):
             classifier._classify_with_llm(task)
             llm_parsed_data = classifier._last_parsed_data
 
+            # 注意：即使 LLM 返回 invalid，也不应该直接失败
+            # 因为任务已经通过了正则解析，说明格式是有效的
+            # 只是 local 执行失败了，应该继续尝试 LLM 从头规划
             if llm_parsed_data and llm_parsed_data.get("type") == "invalid":
-                return {"success": False, "message": "无效的输入指令", "error_type": "invalid_input"}
+                self._log(f"LLM 重新分类为 invalid，但任务已通过正则验证，继续 LLM 从头规划")
+                return {"success": False, "need_llm_replan": True, "message": "local失败，需要LLM从头规划"}
 
             if llm_parsed_data and llm_parsed_data.get("type") in simple_task_types:
                 # LLM 分配为简单任务 → 再次 local 执行
