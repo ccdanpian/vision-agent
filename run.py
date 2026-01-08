@@ -321,37 +321,43 @@ def run_interactive_mode(device: str):
         # 根据选择显示提示信息
         print("\n" + "=" * 50)
         if mode_choice == '1':
-            print("           快速模式（SS格式）")
+            print("              快速模式")
             print("=" * 50)
-            print("\n格式说明：")
-            print("  发消息（默认）：联系人:消息内容")
-            print("  发朋友圈：朋友圈:朋友圈内容")
+            print("\n频道前缀：")
+            print("  @ 或无前缀 = 微信（默认）")
+            print("  %          = Chrome浏览器")
+            print("  $          = 系统应用/设置")
+            print()
+            print("微信格式：")
+            print("  发消息：联系人:消息内容")
+            print("  发朋友圈：朋友圈:内容")
             print()
             print("示例：")
-            print("  张三:你好")
-            print("  李四:早上好，今天开会")
-            print("  朋友圈:今天天气真好")
+            print("  张三:你好          → 微信发消息")
+            print("  朋友圈:天气真好    → 微信发朋友圈")
+            print("  %打开百度          → Chrome打开网页")
+            print("  $打开WiFi设置      → 系统设置")
             print()
             print("提示：")
             print("  - 冒号支持中英文（: 或 ：）")
-            print("  - 默认发消息，只需输入联系人和内容")
-            print("  - 输入 'q' 或 'quit' 退出")
-            print("  - 按 Ctrl+C 也可以退出")
+            print("  - 输入 'q' 退出，'m' 切换模式")
         else:
             print("           智能模式（自然语言）")
             print("=" * 50)
-            print("\n说明：")
-            print("  直接用自然语言描述任务，AI 会自动理解")
+            print("\n频道前缀：")
+            print("  @ 或无前缀 = 微信（默认）")
+            print("  %          = Chrome浏览器")
+            print("  $          = 系统应用/设置")
             print()
             print("示例：")
-            print("  给张三发消息说你好")
-            print("  给李四发消息说早上好，今天开会")
-            print("  发朋友圈今天天气真好")
+            print("  给张三发消息说你好      → 微信")
+            print("  发朋友圈今天天气真好    → 微信")
+            print("  %搜索今日新闻           → Chrome")
+            print("  $打开蓝牙设置           → 系统")
             print()
             print("提示：")
-            print("  - 无效输入会自动提示重新输入")
-            print("  - 输入 'q' 或 'quit' 退出")
-            print("  - 按 Ctrl+C 也可以退出")
+            print("  - 无前缀默认微信频道")
+            print("  - 输入 'q' 退出，'m' 切换模式")
         print()
 
         # 内层循环：连续执行任务
@@ -373,6 +379,11 @@ def run_interactive_mode(device: str):
                 if task_input.lower() in ['q', 'quit', 'exit']:
                     print("退出交互式模式")
                     return
+
+                if task_input.lower() == 'm':
+                    print("切换模式...")
+                    restart_mode_selection = True
+                    break
 
                 # 处理任务输入（快速模式和智能模式都直接使用用户输入）
                 task = task_input
