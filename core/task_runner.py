@@ -245,64 +245,44 @@ class TaskRunner:
         handler = None
         parsed_data = None
         if self.use_modules:
-            from ai.task_classifier import TaskClassifier
+            from ai.task_classifier import TaskClassifier, Channel
             classifier = TaskClassifier()
 
-            # 检查是否为快速模式（联系人:消息 或 联系人 消息 格式）
-            if classifier._is_ss_mode(task):
-                self._log("检测到 SS 快速模式，尝试解析")
-                task_type, parsed_data = classifier.classify_and_parse(task)
+            # 统一使用 classify_and_parse 进行分类（已包含频道检测）
+            self._log("开始任务分类...")
+            task_type, parsed_data = classifier.classify_and_parse(task)
 
-                if parsed_data and parsed_data.get("type") and parsed_data["type"] != "invalid":
-                    # SS 模式解析成功，使用类型路由
-                    type_to_module = {
-                        "send_msg": "wechat",
-                        "post_moment_only_text": "wechat"
-                    }
-                    module_name = type_to_module.get(parsed_data["type"])
-                    if module_name:
-                        handler = ModuleRegistry.get(module_name)
-                        if handler:
-                            self._current_handler = handler
-                            self._log(f"SS 模式路由到模块: {handler.module_info.name} (type={parsed_data['type']})")
+            if parsed_data:
+                # 获取频道（默认微信）
+                channel = parsed_data.get("channel", "wechat")
+                task_parsed_type = parsed_data.get("type")
 
-            # 快速模式未匹配，使用 LLM 分类器进行分类
-            if handler is None:
-                self._log("快速模式未匹配，使用 LLM 进行任务分类")
-                task_type, parsed_data = classifier.classify_and_parse(task)
+                self._log(f"分类结果: channel={channel}, type={task_parsed_type}")
 
-                if parsed_data and parsed_data.get("type"):
-                    if parsed_data["type"] == "invalid":
-                        # LLM 判断为无效输入
-                        self._log("LLM 判断为无效输入")
-                        error_msg = "❌ 无效的输入指令，请检查格式后重试。"
-                        result = TaskResult(
-                            status=TaskStatus.FAILED,
-                            error_message=error_msg,
-                            total_time=0.0
-                        )
-                        self.state = TaskStatus.FAILED
-                        return result
-                    elif parsed_data["type"] in ["send_msg", "post_moment_only_text"]:
-                        # LLM 分类成功，使用类型路由
-                        self._log(f"LLM 分类成功: type={parsed_data['type']}")
-                        type_to_module = {
-                            "send_msg": "wechat",
-                            "post_moment_only_text": "wechat"
-                        }
-                        module_name = type_to_module.get(parsed_data["type"])
-                        if module_name:
-                            handler = ModuleRegistry.get(module_name)
-                            if handler:
-                                self._current_handler = handler
-                                self._log(f"LLM 模式路由到模块: {handler.module_info.name} (type={parsed_data['type']})")
-                    elif parsed_data["type"] == "others":
-                        # 复杂任务，使用关键词路由
-                        self._log("LLM 分类为复杂任务，使用关键词路由")
-                        handler, score = ModuleRegistry.route(task)
-                        if handler:
-                            self._current_handler = handler
-                            self._log(f"路由到模块: {handler.module_info.name} (匹配度: {score:.2f})")
+                # 检查是否为无效输入
+                if task_parsed_type == "invalid":
+                    self._log("判断为无效输入")
+                    error_msg = "❌ 无效的输入指令，请检查格式后重试。"
+                    return TaskResult(
+                        status=TaskStatus.FAILED,
+                        error_message=error_msg,
+                        total_time=0.0
+                    )
+
+                # 根据频道路由到对应模块
+                channel_to_module = {
+                    "wechat": "wechat",
+                    "chrome": "chrome",
+                    "system": "system"
+                }
+                module_name = channel_to_module.get(channel, "wechat")
+                handler = ModuleRegistry.get(module_name)
+
+                if handler:
+                    self._current_handler = handler
+                    self._log(f"频道路由到模块: {handler.module_info.name} (channel={channel}, type={task_parsed_type})")
+                else:
+                    self._log(f"频道 {channel} 对应的模块 {module_name} 未找到，使用关键词路由")
 
             # 如果仍无 handler，使用关键词路由作为兜底
             if handler is None:

@@ -21,6 +21,13 @@ class TaskType(Enum):
     COMPLEX = "complex"    # 复杂任务：多步骤或包含连接词
 
 
+class Channel(Enum):
+    """频道类型"""
+    WECHAT = "wechat"      # 微信（默认，前缀 @ 或无前缀）
+    CHROME = "chrome"      # Chrome 浏览器（前缀 %）
+    SYSTEM = "system"      # 系统应用/设置（前缀 $）
+
+
 class TaskClassifier:
     """
     任务分类器
@@ -97,6 +104,49 @@ class TaskClassifier:
         if self._logger:
             self._logger(f"[TaskClassifier] {message}")
 
+    def detect_channel(self, task: str) -> tuple:
+        """
+        检测频道前缀并返回频道类型和清理后的任务
+
+        前缀规则：
+        - @ 或无前缀 = 微信（默认）
+        - % = Chrome 浏览器
+        - $ = 系统应用/设置
+
+        Args:
+            task: 用户原始输入
+
+        Returns:
+            (Channel, cleaned_task): 频道类型和去除前缀后的任务
+        """
+        task_stripped = task.strip()
+        if not task_stripped:
+            return Channel.WECHAT, task_stripped
+
+        first_char = task_stripped[0]
+
+        if first_char == '%':
+            # Chrome 浏览器
+            cleaned = task_stripped[1:].strip()
+            self._log(f"检测到 Chrome 前缀 %, 任务: {cleaned}")
+            return Channel.CHROME, cleaned
+
+        elif first_char == '$':
+            # 系统应用/设置
+            cleaned = task_stripped[1:].strip()
+            self._log(f"检测到系统前缀 $, 任务: {cleaned}")
+            return Channel.SYSTEM, cleaned
+
+        elif first_char == '@':
+            # 微信（显式前缀）
+            cleaned = task_stripped[1:].strip()
+            self._log(f"检测到微信前缀 @, 任务: {cleaned}")
+            return Channel.WECHAT, cleaned
+
+        else:
+            # 无前缀，默认微信
+            return Channel.WECHAT, task_stripped
+
     def classify(self, task: str) -> TaskType:
         """
         分类任务
@@ -139,21 +189,25 @@ class TaskClassifier:
         分类任务并返回解析的数据
 
         流程：
-        1. 检查是否为 SS 快速模式（以 ss/SS/Ss/sS 开头）
-        2. SS 模式：直接正则解析，返回简单任务 + 解析数据
-        3. 非 SS 模式：使用 LLM 解析并分类
+        1. 检测频道前缀（@=微信, %=Chrome, $=系统）
+        2. 检查是否为 SS 快速模式（仅微信频道）
+        3. SS 模式：直接正则解析，返回简单任务 + 解析数据
+        4. 非 SS 模式：使用 LLM 解析并分类
 
         Args:
             task: 用户任务描述
 
         Returns:
             (TaskType, parsed_data)
-            parsed_data 包含 type, recipient, content
+            parsed_data 包含 channel, type, recipient, content
         """
-        # 1. 检查是否为 SS 快速模式
-        if self._is_ss_mode(task):
+        # 0. 检测频道前缀
+        prefix_channel, cleaned_task = self.detect_channel(task)
+
+        # 1. 如果是微信频道，检查是否为 SS 快速模式
+        if prefix_channel == Channel.WECHAT and self._is_ss_mode(cleaned_task):
             self._log("检测到 SS 快速模式")
-            parsed_data = self._parse_ss_mode(task)
+            parsed_data = self._parse_ss_mode(cleaned_task)
             if parsed_data:
                 self._last_parsed_data = parsed_data
                 self._log(f"SS 模式解析成功: {parsed_data}")
@@ -162,7 +216,14 @@ class TaskClassifier:
                 self._log("SS 模式解析失败，降级到 LLM 模式")
 
         # 2. 非 SS 模式：使用 LLM 分类和解析
-        task_type = self._classify_with_llm(task)
+        task_type = self._classify_with_llm(cleaned_task)
+
+        # 3. 如果有前缀指定的频道，覆盖 LLM 判断的频道
+        if self._last_parsed_data and prefix_channel != Channel.WECHAT:
+            # 前缀明确指定了非微信频道，覆盖 LLM 的判断
+            self._last_parsed_data["channel"] = prefix_channel.value
+            self._log(f"前缀覆盖频道: {prefix_channel.value}")
+
         return task_type, self._last_parsed_data
 
     def _is_ss_mode(self, task: str) -> bool:
@@ -302,7 +363,7 @@ class TaskClassifier:
             content: 消息内容
 
         Returns:
-            解析后的数据 {type, recipient, content}
+            解析后的数据 {channel, type, recipient, content}
         """
         target_lower = target.lower()
 
@@ -313,6 +374,7 @@ class TaskClassifier:
                 return None
 
             return {
+                "channel": "wechat",
                 "type": "post_moment_only_text",
                 "recipient": "",
                 "content": content
@@ -327,6 +389,7 @@ class TaskClassifier:
                 return None
 
             return {
+                "channel": "wechat",
                 "type": "send_msg",
                 "recipient": target,
                 "content": content
@@ -378,19 +441,32 @@ class TaskClassifier:
         # 确保 LLM agent 存在
         self._ensure_llm_agent()
 
-        system_prompt = """你是一个解析器，只输出JSON。字段包含：type(send_msg/post_moment_only_text/others/invalid), recipient, content
+        system_prompt = """你是一个解析器，只输出JSON。字段包含：channel, type, recipient, content
 
-type 说明：
-- send_msg: 发送消息给联系人
-- post_moment_only_text: 发布纯文字朋友圈
+channel 说明（频道）：
+- wechat: 微信相关操作（发消息、朋友圈、通讯录等）
+- chrome: Chrome浏览器相关操作（打开网页、搜索、书签等）
+- system: 系统应用或设置（打开设置、调节音量、WiFi、蓝牙等）
+
+type 说明（任务类型）：
+- send_msg: 发送消息给联系人（仅微信）
+- post_moment_only_text: 发布纯文字朋友圈（仅微信）
+- open_url: 打开网页（仅chrome）
+- search_web: 搜索网页（仅chrome）
+- open_settings: 打开设置项（仅system）
 - others: 其他复杂任务（多步骤任务）
 - invalid: 无效输入（空白、无意义、误触、错误输入等）
+
+判断规则：
+1. 提到"微信"、"消息"、"朋友圈"、"好友"等 → channel=wechat
+2. 提到"浏览器"、"网页"、"百度"、"谷歌"、"搜索xxx" → channel=chrome
+3. 提到"设置"、"WiFi"、"蓝牙"、"音量"、"亮度"、"系统" → channel=system
+4. 无法判断时默认 channel=wechat
 
 invalid 类型示例：
 - 空白输入、只有空格/换行
 - 无意义的字符（如：aaa、123、！！！）
-- 明显的误触（如：s、ss、、、等）
-- 不清楚的指令"""
+- 明显的误触（如：s、ss、、、等）"""
 
         # 用户提示词就是任务本身
         user_prompt = task
@@ -423,18 +499,20 @@ invalid 类型示例：
             json_match = re.search(r'\{[\s\S]*\}', result_text)
             if json_match:
                 result = json.loads(json_match.group())
+                channel = result.get("channel", "wechat")
                 task_type = result.get("type", "others")
                 recipient = result.get("recipient", "")
                 content = result.get("content", "")
 
                 # 保存解析的数据，供后续使用
                 self._last_parsed_data = {
+                    "channel": channel,
                     "type": task_type,
                     "recipient": recipient,
                     "content": content
                 }
 
-                self._log(f"LLM解析: type={task_type}, recipient={recipient}, content={content}")
+                self._log(f"LLM解析: channel={channel}, type={task_type}, recipient={recipient}, content={content}")
 
                 # 根据type判断任务复杂度
                 if task_type == "invalid":
