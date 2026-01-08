@@ -2,6 +2,63 @@
 
 本指南详细说明如何在 VisionAgent 系统中添加新的应用频道（如微信、抖音、微博等）。
 
+## 启动命令
+
+```bash
+# 1. 查看手机信息（默认任务）
+python run.py
+python run.py -d emulator-5554
+python run.py --device 192.168.1.100:5555
+
+# 2. 执行单个任务
+python run.py -t "打开微信"
+python run.py -t "给张三发消息说你好"
+python run.py -t "发朋友圈今天天气真好"
+
+# 3. SS 快速模式（极速执行，推荐）
+python run.py -t "ss:张三:你好"           # 发消息
+python run.py -t "ss:朋友圈:今天真开心"    # 发朋友圈
+
+# 4. 交互式模式（推荐，支持连续执行）
+python run.py -i
+python run.py --interactive
+python run.py -d emulator-5554 -i
+
+# 5. 其他命令
+python run.py --list          # 列出已连接设备
+python run.py --modules       # 查看可用模块
+python run.py --screenshot output.png  # 截图保存
+```
+
+### 交互式模式说明
+
+交互式模式启动后会提示选择运行模式：
+
+```
+请选择模式:
+  [1] SS快速模式 - 固定格式，极速执行（推荐）
+  [2] LLM智能模式 - 自然语言，AI理解
+```
+
+- **模式1（SS快速模式）**：使用 `联系人:内容` 或 `朋友圈:内容` 格式
+- **模式2（LLM智能模式）**：直接输入自然语言描述
+
+### 环境配置
+
+在 `.env` 文件中配置：
+
+```bash
+# 默认设备
+DEFAULT_DEVICE=emulator-5554
+
+# 任务分类器模式：regex（默认）或 llm
+TASK_CLASSIFIER_MODE=regex
+
+# LLM 配置
+LLM_PROVIDER=claude
+ANTHROPIC_API_KEY=your-api-key
+```
+
 ## 文档索引
 
 | 文档 | 说明 |
@@ -89,11 +146,29 @@ touch __init__.py
 
 详见 [02-workflow-system.md](./02-workflow-system.md#任务分类器taskclassifier)
 
-### 工作流优先级
+### 工作流路由优先级
 
-1. **预设工作流优先**：可靠性高，执行快
-2. **LLM 规划回退**：处理未预设的任务
-3. **AI 辅助恢复**：执行中断时的智能恢复
+```
+1. parsed_data.type 存在 → type 映射路由（最高优先级，SS模式/LLM模式）
+2. task_type == COMPLEX → LLM 选择工作流
+3. 其他 → 规则匹配（兼容旧逻辑）
+```
+
+### 任务执行流程
+
+```
+预置准备 → 执行任务 → 返回结果 → 复位清理
+    │          │          │          │
+    │          │          │          └─ 自动返回首页（try-finally）
+    │          │          └─ 成功/失败结果
+    │          └─ 步骤重试（最多N次）
+    └─ 确保应用在前台，导航到首页
+```
+
+**关键特性**：
+- **预置流程容错**：预置失败不阻断正式任务
+- **步骤自动重试**：失败后最多重试3次，每次尝试恢复
+- **任务完成后复位**：无论成功失败，都自动返回首页
 
 ### 参考图分类
 
@@ -145,3 +220,19 @@ apps/wechat/
 └── prompts/
     └── planner.txt       # 规划器提示词
 ```
+
+## 工作流配置参数
+
+在 `config.py` 中统一配置工作流执行参数：
+
+```python
+# config.py - 工作流执行配置
+WORKFLOW_MAX_STEP_RETRIES = 3        # 步骤最大重试次数
+WORKFLOW_MAX_BACK_PRESSES = 5        # 返回键最多按压次数
+WORKFLOW_BACK_PRESS_INTERVAL = 500   # 返回键按压间隔 (ms)
+WORKFLOW_HOME_MAX_ATTEMPTS = 5       # 确保在首页/导航到首页的最大尝试次数
+WORKFLOW_AI_FALLBACK_ATTEMPTS = 3    # AI回退最大尝试次数
+WORKFLOW_RECOVER_NAV_ATTEMPTS = 3    # 恢复时导航到首页的尝试次数
+```
+
+详见 [04-workflow-executor.md](./04-workflow-executor.md#配置参数)

@@ -40,18 +40,24 @@ class Handler(DefaultHandler):
 ## 工作流选择与执行入口
 
 ```python
-# apps/wechat/handler.py 实际代码
-
-def execute_task_with_workflow(self, task: str) -> Optional[Dict[str, Any]]:
+def execute_task_with_workflow(
+    self,
+    task: str,
+    task_type: TaskType = None,
+    parsed_data: Dict[str, Any] = None
+) -> Optional[Dict[str, Any]]:
     """
     尝试使用工作流执行任务
 
     流程：
-    1. 简单任务 -> 规则匹配
+    1. 如果有 parsed_data.type -> 直接根据 type 选择工作流（SS模式/LLM模式）
     2. 复杂任务 -> LLM 选择
+    3. 简单任务 -> 规则匹配（兼容旧逻辑）
 
     Args:
         task: 用户任务描述
+        task_type: 任务类型（SIMPLE/COMPLEX/INVALID）
+        parsed_data: 已解析的任务数据（包含 type, contact, content 等）
 
     Returns:
         执行结果，如果没有匹配的工作流则返回 None
@@ -59,44 +65,76 @@ def execute_task_with_workflow(self, task: str) -> Optional[Dict[str, Any]]:
     workflow_name = None
     params = {}
 
-    # 1. 检查是否为复杂任务
-    if is_complex_task(task):
+    # 1. 如果已经解析出 type，直接根据 type 选择工作流
+    if parsed_data and parsed_data.get("type"):
+        task_parsed_type = parsed_data["type"]
+        workflow_name = self._map_type_to_workflow(task_parsed_type)
+
+        if workflow_name:
+            params = self._map_parsed_data_to_workflow_params(parsed_data, workflow_name)
+            self._log(f"根据 type 选择工作流: {workflow_name} (type={task_parsed_type})")
+
+    elif task_type == TaskType.COMPLEX:
+        # 2. 复杂任务 -> LLM 选择工作流
         self._log(f"检测到复杂任务，使用 LLM 选择工作流")
         llm_result = self.select_workflow_with_llm(task)
         if llm_result:
             workflow_name = llm_result["workflow_name"]
             params = llm_result["params"]
-            self._log(f"LLM 选择工作流: {workflow_name}, 参数: {params}")
+
     else:
-        # 2. 简单任务使用规则匹配
+        # 3. 简单任务但没有 type -> 规则匹配工作流（兼容旧逻辑）
         match_result = self.match_workflow(task)
         if match_result:
             workflow = match_result["workflow"]
             workflow_name = workflow.name
             param_hints = match_result["param_hints"]
             params = parse_task_params(task, param_hints)
-            self._log(f"规则匹配工作流: {workflow_name}, 参数: {params}")
 
-    # 3. 如果没有匹配到工作流
-    if not workflow_name:
-        self._log(f"未匹配到工作流: {task}")
-        return None
+    # 4. 检查必需参数并执行
+    # ...
+```
 
-    # 4. 检查必需参数
-    workflow = WORKFLOWS[workflow_name]
-    missing = [p for p in workflow.required_params if p not in params]
-    if missing:
-        self._log(f"缺少必需参数: {missing}")
-        return {
-            "success": False,
-            "message": f"无法从任务中解析出必需参数: {missing}",
-            "workflow": workflow_name,
-            "parsed_params": params,
-            "missing_params": missing
-        }
+## Type 到 Workflow 映射
 
-    # 5. 执行工作流
-    return self.execute_workflow(workflow_name, params)
+当任务已通过 TaskClassifier 解析出 type 时，直接使用映射表选择工作流：
+
+```python
+def _map_type_to_workflow(self, task_type: str) -> Optional[str]:
+    """
+    将任务类型映射到工作流名称
+
+    Args:
+        task_type: 任务类型（如 send_msg, post_moment_only_text）
+
+    Returns:
+        工作流名称，如果无法映射则返回 None
+    """
+    type_to_workflow_map = {
+        "send_msg": "send_message",
+        "post_moment_only_text": "post_moments",
+        "search_contact": "search_contact",
+        "add_friend": "add_friend",
+    }
+
+    return type_to_workflow_map.get(task_type)
+```
+
+### 映射表说明
+
+| TaskClassifier 返回的 type | 对应的 Workflow 名称 | 说明 |
+|---------------------------|---------------------|------|
+| `send_msg` | `send_message` | 发送消息给联系人 |
+| `post_moment_only_text` | `post_moments` | 发布纯文字朋友圈 |
+| `search_contact` | `search_contact` | 搜索联系人 |
+| `add_friend` | `add_friend` | 添加好友 |
+
+### 路由优先级
+
+```
+1. parsed_data.type 存在 → type 映射路由（最高优先级）
+2. task_type == COMPLEX → LLM 选择
+3. 其他 → 规则匹配（兼容旧逻辑）
 ```
 
 ## LLM 工作流选择

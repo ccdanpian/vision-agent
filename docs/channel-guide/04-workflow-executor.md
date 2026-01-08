@@ -52,7 +52,7 @@ execute_workflow() 被调用
 ## 初始化
 
 ```python
-# apps/wechat/workflow_executor.py 实际代码
+import config
 
 class WorkflowExecutor:
     """工作流执行器"""
@@ -68,8 +68,10 @@ class WorkflowExecutor:
         self.runner = task_runner
         self.handler = handler
         self._logger = None
-        self._max_back_presses = 5  # 最多按返回键次数
-        self._back_press_interval = 500  # 返回键间隔 ms
+        # 使用 config.py 中的统一配置
+        self._max_back_presses = config.WORKFLOW_MAX_BACK_PRESSES
+        self._back_press_interval = config.WORKFLOW_BACK_PRESS_INTERVAL
+        self._max_step_retries = config.WORKFLOW_MAX_STEP_RETRIES
 ```
 
 ## 确保应用运行
@@ -619,23 +621,23 @@ execute_workflow(workflow, params)
 
 工作流执行采用**渐进式失败处理**策略：每个阶段都有明确的失败检测和恢复尝试，只有在恢复失败后才退出。
 
-### 失败退出点
+### 失败处理策略
 
-| 阶段 | 失败条件 | 返回结果 |
+| 阶段 | 失败条件 | 处理方式 |
 |------|----------|----------|
-| 预置流程 | 微信启动失败 | `{"success": False, "message": "无法启动微信"}` |
-| 预置流程 | 无法回到首页（5次尝试后） | `{"success": False, "message": "无法启动微信"}` |
-| 导航阶段 | 预定义+AI辅助都无法到达首页 | `{"success": False, "message": "...无法导航到首页..."}` |
-| 步骤执行 | 步骤失败且恢复后重试仍失败 | `{"success": False, "message": "步骤 X 失败: ..."}` |
-| 步骤执行 | 步骤失败且无法恢复 | `{"success": False, "message": "步骤 X 失败且无法恢复: ..."}` |
+| 预置流程 | 应用启动失败 | **继续执行**，记录警告 |
+| 预置流程 | 无法回到首页（N次尝试后） | **继续执行**，记录警告 |
+| 导航阶段 | 预定义+AI辅助都无法到达首页 | 返回失败退出 |
+| 步骤执行 | 步骤失败 | **重试最多N次**，每次失败后尝试恢复 |
+| 步骤执行 | N次重试都失败 | 返回失败退出 |
+
+> **配置参数**：重试次数等参数在 `config.py` 中统一配置（见下文"配置参数"节）
 
 ### 恢复机制 (`_try_recover`)
 
 当步骤执行失败时，系统会尝试恢复：
 
 ```python
-# apps/wechat/workflow_executor.py 实际代码
-
 def _try_recover(self, failed_step: NavStep, params: Dict[str, Any]) -> bool:
     """
     尝试从失败中恢复
@@ -659,48 +661,47 @@ def _try_recover(self, failed_step: NavStep, params: Dict[str, Any]) -> bool:
     if current == WeChatScreen.HOME:
         return True
 
-    # 尝试导航回首页
-    return self.navigate_to_home(max_attempts=3)
+    # 尝试导航回首页（使用配置的尝试次数）
+    return self.navigate_to_home(max_attempts=config.WORKFLOW_RECOVER_NAV_ATTEMPTS)
 ```
 
-### 失败处理流程图
+### 步骤重试流程图
 
 ```
-步骤执行失败
+步骤执行（最多 WORKFLOW_MAX_STEP_RETRIES 次重试）
       │
       ▼
-┌─────────────────┐
-│ _try_recover()  │
-│ 1. 按返回键     │
-│ 2. 检测界面     │
-└────────┬────────┘
-         │
-    ┌────┴────┐
-    │         │
-    ▼         ▼
-  在首页    不在首页
-    │         │
-    │         ▼
-    │    navigate_to_home()
-    │    (最多3次)
-    │         │
-    │    ┌────┴────┐
-    │    │         │
-    │    ▼         ▼
-    │  成功      失败
-    │    │         │
-    └────┴────┐    │
-              │    │
-              ▼    ▼
-           重试步骤  返回失败
-              │
-         ┌────┴────┐
-         │         │
-         ▼         ▼
-       成功      失败
-         │         │
-         ▼         ▼
-      继续下一步  返回失败
+┌─────────────────────────┐
+│ retry = 0               │
+│ for retry in range(N):  │
+└───────────┬─────────────┘
+            │
+            ▼
+    ┌───────────────┐
+    │ _execute_step │
+    └───────┬───────┘
+            │
+       成功? ─────────┐
+            │        │
+            ▼        ▼
+          失败     成功 → 继续下一步
+            │
+            ▼
+    是最后一次重试?
+            │
+    ┌───────┴───────┐
+    │否             │是
+    ▼               ▼
+┌─────────────┐   返回失败退出
+│_try_recover │   （已重试N次）
+│ 1.按返回键  │
+│ 2.检测界面  │
+│ 3.导航首页  │
+└──────┬──────┘
+       │
+       ▼
+    retry++
+    继续循环
 ```
 
 ### 任务退出规范
@@ -742,7 +743,104 @@ return {
 
 ### 设计原则
 
-1. **快速失败**：检测到不可恢复的错误时立即返回，避免无效重试
-2. **渐进恢复**：从简单策略（按返回键）到复杂策略（AI辅助）
-3. **状态明确**：每次恢复后都检测界面状态，确保恢复成功
+1. **尽量继续**：预置流程失败不阻止正式任务，给任务更多机会
+2. **多次重试**：步骤失败后最多重试N次，每次失败后尝试恢复
+3. **渐进恢复**：从简单策略（按返回键）到复杂策略（AI辅助）
 4. **日志完整**：每个失败和恢复尝试都有日志记录，便于调试
+
+### 配置参数
+
+工作流执行相关参数在 `config.py` 中统一配置：
+
+```python
+# config.py
+WORKFLOW_MAX_STEP_RETRIES = 3        # 步骤最大重试次数
+WORKFLOW_MAX_BACK_PRESSES = 5        # 返回键最多按压次数
+WORKFLOW_BACK_PRESS_INTERVAL = 500   # 返回键按压间隔 (ms)
+WORKFLOW_HOME_MAX_ATTEMPTS = 5       # 确保在首页/导航到首页的最大尝试次数
+WORKFLOW_AI_FALLBACK_ATTEMPTS = 3    # AI回退最大尝试次数
+WORKFLOW_RECOVER_NAV_ATTEMPTS = 3    # 恢复时导航到首页的尝试次数
+```
+
+在 `WorkflowExecutor` 中使用：
+
+```python
+class WorkflowExecutor:
+    def __init__(self, task_runner, handler):
+        # ...
+        self._max_back_presses = config.WORKFLOW_MAX_BACK_PRESSES
+        self._back_press_interval = config.WORKFLOW_BACK_PRESS_INTERVAL
+        self._max_step_retries = config.WORKFLOW_MAX_STEP_RETRIES
+```
+
+## 任务完成后自动复位
+
+**重要特性**：无论任务成功还是失败，执行完成后都会自动返回首页，确保下次任务从已知状态开始。
+
+### 实现机制
+
+使用 `try-finally` 结构确保复位流程一定执行：
+
+```python
+def execute_workflow(self, workflow: Workflow, params: Dict[str, Any]) -> Dict[str, Any]:
+    # 使用 try-finally 确保任务完成后执行复位
+    try:
+        # 0. 预置流程
+        preset_success = self._ensure_app_running()
+        if not preset_success:
+            self._log("  ⚠ 预置流程失败，但仍尝试继续执行正式任务...")
+
+        # 1-3. 执行正式任务步骤...
+        # ...
+
+        return {"success": True, "message": "工作流执行成功", "data": None}
+
+    finally:
+        # 任务完成后执行复位（无论成功还是失败）
+        self._log("【复位流程】任务完成后复位")
+
+        try:
+            reset_success = self._ensure_at_home_screen()
+            if reset_success:
+                self._log("✓ 复位成功，已返回首页")
+            else:
+                self._log("⚠️  复位失败，但不影响任务结果")
+        except Exception as e:
+            self._log(f"⚠️  复位过程出现异常: {e}")
+```
+
+### 复位流程图
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    execute_workflow()                        │
+└─────────────────────────────────────────────────────────────┘
+                           │
+                           ▼
+                    ┌─────────────┐
+                    │  try 块     │
+                    │  执行任务    │
+                    └──────┬──────┘
+                           │
+              ┌────────────┼────────────┐
+              │            │            │
+              ▼            ▼            ▼
+           成功         失败        异常
+              │            │            │
+              └────────────┴────────────┘
+                           │
+                           ▼
+                    ┌─────────────┐
+                    │ finally 块  │  ← 无论如何都执行
+                    │ 复位到首页   │
+                    └──────┬──────┘
+                           │
+                           ▼
+                      返回结果
+```
+
+### 设计考虑
+
+1. **状态一致性**：每次任务执行前后，应用都处于首页状态
+2. **容错性**：复位失败不影响任务结果的返回
+3. **异常安全**：即使复位过程抛出异常也会被捕获，不会影响主流程
