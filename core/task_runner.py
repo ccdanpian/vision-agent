@@ -241,6 +241,14 @@ class TaskRunner:
         start_time = time.time()
         self._log(f"开始执行任务: {task}")
 
+        # 确保 ADB 连接（自动重连）
+        if not self.adb.ensure_connected():
+            return TaskResult(
+                status=TaskStatus.FAILED,
+                error_message="无法连接到设备，请检查 ADB 连接",
+                total_time=time.time() - start_time
+            )
+
         # 模块路由
         handler = None
         parsed_data = None

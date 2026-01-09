@@ -451,8 +451,15 @@ channel 说明（频道）：
 type 说明（任务类型）：
 - send_msg: 发送消息给联系人（仅微信）
 - post_moment_only_text: 发布纯文字朋友圈（仅微信）
-- open_url: 打开网页（仅chrome）
-- search_web: 搜索网页（仅chrome）
+- open_url: 打开指定网址/URL（仅chrome）
+- search_web: 在浏览器中搜索关键词（仅chrome）
+- open_baidu: 打开百度首页（仅chrome）
+- new_tab: 新建标签页（仅chrome）
+- refresh: 刷新当前页面（仅chrome）
+- view_bookmarks: 查看书签（仅chrome）
+- view_history: 查看历史记录（仅chrome）
+- view_downloads: 查看下载（仅chrome）
+- close_tab: 关闭当前标签页（仅chrome）
 - open_settings: 打开设置项（仅system）
 - others: 其他复杂任务（多步骤任务）
 - invalid: 无效输入（空白、无意义、误触、错误输入等）
@@ -519,8 +526,15 @@ invalid 类型示例：
                     # 无效输入，标记为复杂任务（在 handler 中会被特殊处理）
                     self._log("LLM判断：无效输入")
                     return TaskType.COMPLEX
-                elif task_type in ["send_msg", "post_moment_only_text"]:
-                    # send_msg 和 post_moment_only_text 是简单任务
+                elif task_type in [
+                    # 微信简单任务
+                    "send_msg", "post_moment_only_text",
+                    # Chrome 简单任务
+                    "open_url", "search_web", "open_baidu", "new_tab",
+                    "refresh", "view_bookmarks", "view_history",
+                    "view_downloads", "close_tab"
+                ]:
+                    # 简单任务：单一动作，可由预定义工作流完成
                     return TaskType.SIMPLE
                 else:
                     # others类型或无法识别的，判断为复杂任务

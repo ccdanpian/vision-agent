@@ -76,6 +76,27 @@ class ADBController:
         )
         return self.device_address in result.stdout and "device" in result.stdout
 
+    def ensure_connected(self, max_retries: int = 3) -> bool:
+        """
+        确保设备已连接，如果断开则自动重连
+
+        Args:
+            max_retries: 最大重试次数
+
+        Returns:
+            是否连接成功
+        """
+        for attempt in range(max_retries):
+            if self.is_connected():
+                return True
+            print(f"[ADB] 连接断开，尝试重连 ({attempt + 1}/{max_retries})...")
+            if self.connect():
+                print("[ADB] 重连成功")
+                return True
+            time.sleep(1)
+        print("[ADB] 重连失败")
+        return False
+
     def get_screen_size(self) -> Tuple[int, int]:
         """获取屏幕分辨率（优先使用 Override size）"""
         if self._screen_size:
